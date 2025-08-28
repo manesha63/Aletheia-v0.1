@@ -291,10 +291,82 @@ services:
       timeout: 10s
       retries: 3
 
+  # Elasticsearch for document indexing and search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.1
+    container_name: elasticsearch-judicial
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - http.host=0.0.0.0
+      - transport.host=127.0.0.1
+      - network.host=0.0.0.0
+      - cluster.name=judicial-cluster
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+      - "${ELASTICSEARCH_CLUSTER_PORT:-9300}:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - backend
+
+  # Haystack RAG service for document processing
+  haystack-service:
+    image: data_compose-haystack-service:latest
+    container_name: haystack-judicial
+    ports:
+      - "${HAYSTACK_PORT:-8000}:8000"
+    environment:
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - HAYSTACK_MODE=unified
+      - ENABLE_POSTGRESQL=true
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - ELASTICSEARCH_INDEX=legal-documents-rag
+    depends_on:
+      db:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - haystack_models:/app/models
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # Unstructured service for document parsing
+  unstructured-service:
+    build:
+      context: .
+      dockerfile: ./n8n/unstructured-service/Dockerfile
+    container_name: unstructured-judicial
+    ports:
+      - "${UNSTRUCTURED_PORT:-8880}:8880"
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    networks:
+      - backend
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   n8n_data:
   redis_data:
+  elasticsearch_data:
+    driver: local
+  haystack_models:
+    driver: local
 
 networks:
   frontend:

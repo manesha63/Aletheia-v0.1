@@ -383,24 +383,24 @@ utils_validate() {
         issues=$((issues + 1))
     fi
     
-    if [ -f "$DOCKER_COMPOSE.yml" ]; then
+    if [ -f "docker-compose.yml" ]; then
         if [ "$OUTPUT_FORMAT" != "json" ]; then
-            echo -e "${GREEN}✓${NC} $DOCKER_COMPOSE.yml exists"
+            echo -e "${GREEN}✓${NC} docker-compose.yml exists"
         fi
         # Validate docker-compose syntax
         if $DOCKER_COMPOSE config > /dev/null 2>&1; then
             if [ "$OUTPUT_FORMAT" != "json" ]; then
-                echo -e "${GREEN}✓${NC} $DOCKER_COMPOSE.yml syntax valid"
+                echo -e "${GREEN}✓${NC} docker-compose.yml syntax valid"
             fi
         else
             if [ "$OUTPUT_FORMAT" != "json" ]; then
-                echo -e "${RED}✗${NC} $DOCKER_COMPOSE.yml has syntax errors"
+                echo -e "${RED}✗${NC} docker-compose.yml has syntax errors"
             fi
             issues=$((issues + 1))
         fi
     else
         if [ "$OUTPUT_FORMAT" != "json" ]; then
-            echo -e "${RED}✗${NC} $DOCKER_COMPOSE.yml missing"
+            echo -e "${RED}✗${NC} docker-compose.yml missing"
         fi
         issues=$((issues + 1))
     fi

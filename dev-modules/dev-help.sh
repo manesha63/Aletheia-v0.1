@@ -8,7 +8,7 @@
 # Function to show main help
 show_help() {
     echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║     Aletheia Developer CLI v2.0       ║${NC}"
+    echo -e "${BLUE}║     Aletheia Developer CLI v3.0       ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: ./dev [command] [options]"

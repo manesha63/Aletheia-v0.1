@@ -256,7 +256,7 @@ service_status() {
         
         # Container status
         echo -e "${CYAN}Containers:${NC}"
-        $DOCKER_COMPOSE ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+        $DOCKER_COMPOSE ps -a --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
         echo ""
         
         # Health status
@@ -269,7 +269,7 @@ service_status() {
     services_json="["
     first=true
     
-    for container in $(docker ps --format "{{.Names}}" --filter "label=com.docker.compose.project=${PROJECT_NAME}"); do
+    for container in $(docker ps -a --format "{{.Names}}" --filter "label=com.docker.compose.project=${PROJECT_NAME}"); do
         # Special handling for known containers without standard health checks
         if [[ "$container" == *"recap-webhook"* ]]; then
             if [ "$OUTPUT_FORMAT" != "json" ]; then
@@ -279,7 +279,26 @@ service_status() {
             continue
         fi
         
-        # Try to get health status
+        # Check if container is running
+        container_state=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "error")
+        
+        if [ "$container_state" = "exited" ] || [ "$container_state" = "stopped" ]; then
+            if [ "$OUTPUT_FORMAT" != "json" ]; then
+                echo -e "${RED}✗${NC} $container: stopped/exited"
+            fi
+            unhealthy=$((unhealthy + 1))
+            if [ "$OUTPUT_FORMAT" = "json" ]; then
+                if [ "$first" = true ]; then
+                    first=false
+                else
+                    services_json="${services_json},"
+                fi
+                services_json="${services_json}{\"name\":\"$container\",\"health\":\"stopped\"}"
+            fi
+            continue
+        fi
+        
+        # Try to get health status for running containers
         health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no check{{end}}' "$container" 2>/dev/null || echo "error")
         
         case "$health" in

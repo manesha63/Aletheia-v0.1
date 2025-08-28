@@ -74,6 +74,7 @@ source "$SCRIPT_DIR/dev-modules/dev-docs.sh"
 source "$SCRIPT_DIR/dev-modules/dev-n8n.sh"
 source "$SCRIPT_DIR/dev-modules/dev-reconcile.sh"
 source "$SCRIPT_DIR/dev-modules/dev-audit.sh"
+source "$SCRIPT_DIR/dev-modules/dev-deps.sh"
 
 # ============================================================================
 # Main Command Router
@@ -187,6 +188,11 @@ case "$1" in
     # Audit Commands
     audit)
         handle_audit_command "$2" "${@:3}"
+        ;;
+        
+    # Dependency Commands
+    deps|dependencies)
+        handle_deps_command "$2" "${@:3}"
         ;;
         
     # Help

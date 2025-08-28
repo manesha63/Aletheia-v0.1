@@ -249,6 +249,21 @@ service_restart() {
 
 # Show service status
 service_status() {
+    local explain=false
+    local verbose=false
+    
+    # Parse arguments
+    for arg in "$@"; do
+        case "$arg" in
+            --explain)
+                explain=true
+                ;;
+            --verbose|-v)
+                verbose=true
+                ;;
+        esac
+    done
+    
     check_requirements
     
     if [ "$OUTPUT_FORMAT" != "json" ]; then
@@ -284,7 +299,45 @@ service_status() {
         
         if [ "$container_state" = "exited" ] || [ "$container_state" = "stopped" ]; then
             if [ "$OUTPUT_FORMAT" != "json" ]; then
-                echo -e "${RED}✗${NC} $container: stopped/exited"
+                local exit_code=$(docker inspect --format='{{.State.ExitCode}}' "$container" 2>/dev/null)
+                echo -e "${RED}✗${NC} $container: stopped/exited (exit code: $exit_code)"
+                
+                # Show explanation if requested
+                if [ "$explain" = true ]; then
+                    echo -e "    ${CYAN}Stopped at:${NC} $(docker inspect --format='{{.State.FinishedAt}}' "$container" 2>/dev/null | cut -d'T' -f1,2)"
+                    
+                    # Get last logs
+                    local last_logs=$(docker logs "$container" 2>&1 | tail -5)
+                    if [ -n "$last_logs" ]; then
+                        echo -e "    ${CYAN}Last logs:${NC}"
+                        echo "$last_logs" | sed 's/^/      /'
+                    fi
+                    
+                    # Common exit code explanations
+                    case "$exit_code" in
+                        0)
+                            echo -e "    ${GREEN}Exit code 0:${NC} Clean shutdown"
+                            ;;
+                        1)
+                            echo -e "    ${RED}Exit code 1:${NC} General application error"
+                            ;;
+                        125)
+                            echo -e "    ${RED}Exit code 125:${NC} Docker run command failed"
+                            ;;
+                        126)
+                            echo -e "    ${RED}Exit code 126:${NC} Container command not executable"
+                            ;;
+                        127)
+                            echo -e "    ${RED}Exit code 127:${NC} Container command not found"
+                            ;;
+                        137)
+                            echo -e "    ${YELLOW}Exit code 137:${NC} Container killed (SIGKILL) - possibly OOM"
+                            ;;
+                        143)
+                            echo -e "    ${YELLOW}Exit code 143:${NC} Container terminated (SIGTERM)"
+                            ;;
+                    esac
+                fi
             fi
             unhealthy=$((unhealthy + 1))
             if [ "$OUTPUT_FORMAT" = "json" ]; then
@@ -314,6 +367,22 @@ service_status() {
                 if [[ "$container" != *"recap-webhook"* ]]; then
                     if [ "$OUTPUT_FORMAT" != "json" ]; then
                         echo -e "${RED}✗${NC} $container: $health"
+                        
+                        # Show explanation if requested
+                        if [ "$explain" = true ]; then
+                            # Get health check logs
+                            local health_log=$(docker inspect --format='{{range .State.Health.Log}}{{.Output}}{{end}}' "$container" 2>/dev/null | tail -1)
+                            if [ -n "$health_log" ]; then
+                                echo -e "    ${CYAN}Health check output:${NC} $health_log"
+                            fi
+                            
+                            # Get last container logs
+                            local last_logs=$(docker logs "$container" 2>&1 | tail -3)
+                            if [ -n "$last_logs" ]; then
+                                echo -e "    ${CYAN}Recent logs:${NC}"
+                                echo "$last_logs" | sed 's/^/      /'
+                            fi
+                        fi
                     fi
                     unhealthy=$((unhealthy + 1))
                 fi

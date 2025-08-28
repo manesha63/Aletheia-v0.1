@@ -72,6 +72,8 @@ source "$SCRIPT_DIR/dev-modules/dev-utils.sh"
 source "$SCRIPT_DIR/dev-modules/dev-env.sh"
 source "$SCRIPT_DIR/dev-modules/dev-docs.sh"
 source "$SCRIPT_DIR/dev-modules/dev-n8n.sh"
+source "$SCRIPT_DIR/dev-modules/dev-reconcile.sh"
+source "$SCRIPT_DIR/dev-modules/dev-audit.sh"
 
 # ============================================================================
 # Main Command Router
@@ -93,7 +95,7 @@ case "$1" in
         ;;
         
     status|ps)
-        service_status
+        service_status "$@"
         ;;
         
     logs|log)
@@ -175,6 +177,16 @@ case "$1" in
     # n8n Commands
     n8n)
         handle_n8n_command "$2" "${@:3}"
+        ;;
+        
+    # Reconciliation Commands
+    reconcile)
+        handle_reconcile_command "$2" "${@:3}"
+        ;;
+        
+    # Audit Commands
+    audit)
+        handle_audit_command "$2" "${@:3}"
         ;;
         
     # Help

@@ -69,6 +69,9 @@ source "$SCRIPT_DIR/dev-modules/dev-help.sh"
 source "$SCRIPT_DIR/dev-modules/dev-services.sh"
 source "$SCRIPT_DIR/dev-modules/dev-db.sh"
 source "$SCRIPT_DIR/dev-modules/dev-utils.sh"
+source "$SCRIPT_DIR/dev-modules/dev-setup.sh"
+source "$SCRIPT_DIR/dev-modules/dev-doctor.sh"
+source "$SCRIPT_DIR/dev-modules/dev-rebuild.sh"
 source "$SCRIPT_DIR/dev-modules/dev-env.sh"
 source "$SCRIPT_DIR/dev-modules/dev-docs.sh"
 source "$SCRIPT_DIR/dev-modules/dev-n8n.sh"
@@ -122,11 +125,11 @@ case "$1" in
         
     # Utility Commands
     setup)
-        utils_setup "${@:2}"
+        handle_setup_command "${@:2}"
         ;;
         
     doctor)
-        utils_doctor
+        handle_doctor_command
         ;;
         
     validate)
@@ -142,7 +145,7 @@ case "$1" in
         ;;
         
     rebuild)
-        utils_rebuild "${@:2}"
+        handle_rebuild_command "${@:2}"
         ;;
         
     cleanup)

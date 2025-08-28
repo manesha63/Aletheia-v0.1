@@ -46,10 +46,24 @@ reconcile_status() {
     compose_services=$($DOCKER_COMPOSE config --services 2>/dev/null | sort)
     local compose_count=$(echo "$compose_services" | wc -l)
     
+    # Build service to container name mapping
+    local service_container_map="/tmp/service_container_map_$$"
+    > "$service_container_map"
+    
+    for service in $compose_services; do
+        # Get the container_name if defined, otherwise use default naming
+        local container_name=$($DOCKER_COMPOSE config | grep -A 10 "^  $service:" | grep "container_name:" | awk '{print $2}')
+        if [ -z "$container_name" ]; then
+            # Default docker-compose naming: projectname-service-1
+            container_name="${PROJECT_NAME}-${service}-1"
+        fi
+        echo "$service:$container_name" >> "$service_container_map"
+    done
+    
     # Get all containers for this project
     local all_containers
     all_containers=$(docker ps -a --filter "label=com.docker.compose.project=${PROJECT_NAME}" --format "{{.Names}}" | sort)
-    local container_count=$(echo "$all_containers" | grep -c .)
+    local container_count=$(echo "$all_containers" | grep -c . || echo "0")
     
     # Get running containers
     local running_containers
@@ -62,13 +76,12 @@ reconcile_status() {
     
     for container in $all_containers; do
         local found=false
-        for service in $compose_services; do
-            # Check if container name contains the service name
-            if [[ "$container" == *"$service"* ]] || [[ "$container" == "$service" ]]; then
+        while IFS=: read -r service expected_container; do
+            if [ "$container" = "$expected_container" ]; then
                 found=true
                 break
             fi
-        done
+        done < "$service_container_map"
         if [ "$found" = false ]; then
             orphans="$orphans $container"
             orphan_count=$((orphan_count + 1))
@@ -79,10 +92,10 @@ reconcile_status() {
     local missing=""
     local missing_count=0
     
-    for service in $compose_services; do
+    while IFS=: read -r service expected_container; do
         local found=false
         for container in $all_containers; do
-            if [[ "$container" == *"$service"* ]] || [[ "$container" == "$service" ]]; then
+            if [ "$container" = "$expected_container" ]; then
                 found=true
                 break
             fi
@@ -91,7 +104,10 @@ reconcile_status() {
             missing="$missing $service"
             missing_count=$((missing_count + 1))
         fi
-    done
+    done < "$service_container_map"
+    
+    # Clean up temp file
+    rm -f "$service_container_map"
     
     # Find stopped containers
     local stopped=""

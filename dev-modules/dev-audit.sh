@@ -67,16 +67,32 @@ audit_env() {
         env_vars=$(grep -E '^[A-Z_][A-Z0-9_]*=' .env | cut -d= -f1 | sort -u)
     fi
     
+    # Get variables with defaults first
+    local vars_with_defaults=""
+    local defaults_list=$(grep -oE '\$\{[A-Z_][A-Z0-9_]*:-[^}]+\}' docker-compose.yml 2>/dev/null | \
+                         sed -E 's/\$\{([A-Z_][A-Z0-9_]*):-[^}]+\}/\1/' | sort -u)
+    
     # Find undefined variables
     local undefined=""
     local undefined_count=0
+    local undefined_no_default=""
+    local undefined_no_default_count=0
     local defined_count=0
     local unused=""
     local unused_count=0
     
     for var in $compose_vars; do
         if ! echo "$env_vars" | grep -q "^$var$"; then
-            undefined="$undefined $var"
+            # Check if it has a default value
+            if echo "$defaults_list" | grep -q "^$var$"; then
+                # Has default, not really undefined
+                undefined="$undefined $var"
+            else
+                # No default, truly undefined
+                undefined="$undefined $var"
+                undefined_no_default="$undefined_no_default $var"
+                undefined_no_default_count=$((undefined_no_default_count + 1))
+            fi
             undefined_count=$((undefined_count + 1))
         else
             defined_count=$((defined_count + 1))
@@ -123,21 +139,38 @@ audit_env() {
         echo -e "${CYAN}Summary:${NC}"
         echo -e "  Variables in docker-compose: $(echo "$compose_vars" | wc -w)"
         echo -e "  Variables defined in .env:   ${GREEN}$defined_count${NC}"
-        echo -e "  Variables undefined:         ${RED}$undefined_count${NC}"
+        if [ $undefined_no_default_count -gt 0 ]; then
+            echo -e "  Variables undefined (no default): ${RED}$undefined_no_default_count${NC}"
+        fi
+        local with_default_count=$((undefined_count - undefined_no_default_count))
+        if [ $with_default_count -gt 0 ]; then
+            echo -e "  Variables with defaults:     ${YELLOW}$with_default_count${NC}"
+        fi
         echo -e "  Variables unused:            ${YELLOW}$unused_count${NC}"
         echo ""
         
-        # Show undefined variables
-        if [ $undefined_count -gt 0 ]; then
-            echo -e "${RED}⚠ Undefined Variables:${NC}"
-            for var in $undefined; do
-                # Check if it has a default
+        # Show undefined variables that need attention
+        if [ $undefined_no_default_count -gt 0 ]; then
+            echo -e "${RED}⚠ Undefined Variables (no defaults):${NC}"
+            for var in $undefined_no_default; do
+                echo -e "  ${RED}✗${NC} $var"
+            done
+            echo ""
+        fi
+        
+        # Show variables with defaults
+        local vars_with_defaults_to_show=""
+        for var in $undefined; do
+            if echo "$defaults_list" | grep -q "^$var$"; then
+                vars_with_defaults_to_show="$vars_with_defaults_to_show $var"
+            fi
+        done
+        
+        if [ -n "$vars_with_defaults_to_show" ]; then
+            echo -e "${YELLOW}ℹ Variables Using Defaults:${NC}"
+            for var in $vars_with_defaults_to_show; do
                 default=$(echo "$with_defaults" | grep "^$var:" | cut -d: -f2-)
-                if [ -n "$default" ]; then
-                    echo -e "  ${YELLOW}○${NC} $var (default: $default)"
-                else
-                    echo -e "  ${RED}✗${NC} $var (no default)"
-                fi
+                echo -e "  ${YELLOW}○${NC} $var (default: $default)"
             done
             echo ""
         fi

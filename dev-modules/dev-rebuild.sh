@@ -12,7 +12,7 @@ handle_rebuild_command() {
 
 # Rebuild services
 utils_rebuild() {
-    check_requirements_cached
+    check_requirements
     check_env
     
     # Parse arguments

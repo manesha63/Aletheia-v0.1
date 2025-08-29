@@ -159,11 +159,28 @@ url_encode() {
     python3 -c "import urllib.parse; print(urllib.parse.quote('$string'))" 2>/dev/null || echo "$string"
 }
 
-# Check if Docker and docker-compose are installed
+# Cached requirement check variables (session-level)
+REQUIREMENTS_CHECKED=false
+REQUIREMENTS_VALID=false
+
+# Check if Docker and docker-compose are installed (cached version)
 check_requirements() {
+    # Use cached version if available
+    if [ "$REQUIREMENTS_CHECKED" = true ]; then
+        if [ "$REQUIREMENTS_VALID" = false ]; then
+            exit $EXIT_CONFIG_ERROR
+        fi
+        return 0
+    fi
+    
+    # Mark as checked
+    REQUIREMENTS_CHECKED=true
+    
+    # Check Docker
     if ! command -v docker &> /dev/null; then
         echo -e "${RED}Error: Docker is not installed${NC}"
         echo -e "${YELLOW}Please install Docker Desktop from: https://www.docker.com/products/docker-desktop${NC}"
+        REQUIREMENTS_VALID=false
         exit $EXIT_CONFIG_ERROR
     fi
     
@@ -171,6 +188,7 @@ check_requirements() {
     if [ -z "$DOCKER_COMPOSE" ]; then
         echo -e "${RED}Error: docker-compose is not installed${NC}"
         echo -e "${YELLOW}Docker Compose should come with Docker Desktop. Please reinstall Docker Desktop.${NC}"
+        REQUIREMENTS_VALID=false
         exit $EXIT_CONFIG_ERROR
     fi
     
@@ -183,8 +201,13 @@ check_requirements() {
         echo -e "  • On Windows: Open Docker Desktop from Start Menu"
         echo ""
         echo -e "${CYAN}After starting Docker, run this command again.${NC}"
+        REQUIREMENTS_VALID=false
         exit $EXIT_SERVICE_UNAVAILABLE
     fi
+    
+    # All checks passed
+    REQUIREMENTS_VALID=true
+    return 0
 }
 
 # Check if .env exists
@@ -263,3 +286,24 @@ export -f check_requirements
 export -f check_env
 export -f print_header
 export -f confirm_operation
+
+# ============================================================================
+# Session Cleanup
+# ============================================================================
+
+# Clean up all session temporary files
+cleanup_session() {
+    # Clean up any temporary files created during session
+    rm -f /tmp/aletheia_*_$$ 2>/dev/null
+    rm -f /tmp/service_container_map_$$ 2>/dev/null
+    
+    # Call docker cleanup if it was sourced
+    if declare -f cleanup_docker_caches &>/dev/null; then
+        cleanup_docker_caches
+    fi
+}
+
+# Register cleanup on exit
+trap cleanup_session EXIT INT TERM
+
+export -f cleanup_session

@@ -59,8 +59,8 @@ show_all_deps() {
         print_header "Service Dependency Map"
     fi
     
-    # Get all services and their dependencies
-    local services=$($DOCKER_COMPOSE config --services 2>/dev/null | sort)
+    # Get all services using shared function
+    local services=$(get_all_services | sort)
     
     # Use temp files for dependency maps (macOS bash doesn't support associative arrays)
     local deps_file="/tmp/deps_map_$$"
@@ -147,7 +147,7 @@ show_service_deps() {
     fi
     
     # Check if service exists
-    if ! $DOCKER_COMPOSE config --services 2>/dev/null | grep -q "^$service$"; then
+    if ! get_all_services | grep -q "^$service$"; then
         output_result "error" "Service '$service' not found"
         return $EXIT_CONFIG_ERROR
     fi
@@ -193,7 +193,7 @@ show_service_deps() {
         echo ""
         echo -e "${CYAN}Services that depend on $service:${NC}"
         local found=false
-        for other in $($DOCKER_COMPOSE config --services 2>/dev/null); do
+        for other in $(get_all_services); do
             if [ "$other" != "$service" ]; then
                 local other_deps=$($DOCKER_COMPOSE config 2>/dev/null | \
                                   awk "/^  $other:$/,/^  [a-z-]+:$/" | \
@@ -260,7 +260,7 @@ show_dep_tree() {
 
 # Check for circular dependencies
 check_circular_deps() {
-    local services=$($DOCKER_COMPOSE config --services 2>/dev/null)
+    local services=$(get_all_services)
     local circular_found=false
     
     echo -e "${CYAN}Checking for circular dependencies:${NC}"
@@ -310,7 +310,7 @@ has_circular_dep() {
 show_dependency_levels() {
     echo -e "${CYAN}Recommended startup order:${NC}"
     
-    local services=$($DOCKER_COMPOSE config --services 2>/dev/null)
+    local services=$(get_all_services)
     local deps_file="/tmp/deps_levels_$$"
     
     # Clean up temp file on exit
@@ -422,8 +422,8 @@ check_dependencies() {
     for dep in $deps; do
         # Check if container exists and is running
         if docker ps --format "{{.Names}}" | grep -q "$dep"; then
-            # Check health if available
-            local health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}' "$dep" 2>/dev/null)
+            # Check health using shared function
+            local health=$(get_service_health "$dep")
             
             if [ "$health" = "healthy" ] || [ "$health" = "running" ]; then
                 echo -e "  ${GREEN}✓${NC} $dep is ready"

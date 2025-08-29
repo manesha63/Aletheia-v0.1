@@ -5,46 +5,6 @@
 # ============================================================================
 # This module handles system diagnostics and health checks
 
-# Cached requirement check (valid for session)
-REQUIREMENTS_CHECKED=false
-REQUIREMENTS_VALID=false
-
-# Enhanced check_requirements with caching
-check_requirements_cached() {
-    if [ "$REQUIREMENTS_CHECKED" = true ]; then
-        if [ "$REQUIREMENTS_VALID" = false ]; then
-            return $EXIT_CONFIG_ERROR
-        fi
-        return $EXIT_SUCCESS
-    fi
-    
-    REQUIREMENTS_CHECKED=true
-    
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}Error: Docker is not installed${NC}"
-        echo -e "${YELLOW}Please install Docker Desktop from: https://www.docker.com/products/docker-desktop${NC}"
-        REQUIREMENTS_VALID=false
-        return $EXIT_CONFIG_ERROR
-    fi
-    
-    if [ -z "$DOCKER_COMPOSE" ]; then
-        echo -e "${RED}Error: docker-compose is not installed${NC}"
-        echo -e "${YELLOW}Docker Compose should come with Docker Desktop. Please reinstall Docker Desktop.${NC}"
-        REQUIREMENTS_VALID=false
-        return $EXIT_CONFIG_ERROR
-    fi
-    
-    if ! docker info &> /dev/null; then
-        echo -e "${RED}Error: Docker daemon is not running${NC}"
-        echo -e "${YELLOW}Please start Docker Desktop first${NC}"
-        REQUIREMENTS_VALID=false
-        return $EXIT_SERVICE_UNAVAILABLE
-    fi
-    
-    REQUIREMENTS_VALID=true
-    return $EXIT_SUCCESS
-}
-
 # Handle doctor command
 handle_doctor_command() {
     utils_doctor "$@"
@@ -204,14 +164,14 @@ utils_doctor() {
 
 # System health check
 utils_health() {
-    check_requirements_cached || return $?
+    check_requirements || return $?
     
     if [ "$OUTPUT_FORMAT" != "json" ]; then
         print_header "Service Health Check"
     fi
     
-    # Get all services from docker-compose
-    local all_services=$($DOCKER_COMPOSE config --services 2>/dev/null)
+    # Get all services using shared function
+    local all_services=$(get_all_services)
     
     # Get running containers
     local healthy=0
@@ -222,18 +182,14 @@ utils_health() {
     fi
     
     for service in $all_services; do
-        # Get the actual container name for this service
-        local container_name=$($DOCKER_COMPOSE config | grep -A 10 "^  $service:" | grep "container_name:" | awk '{print $2}')
-        if [ -z "$container_name" ]; then
-            # Default docker-compose naming: projectname-service-1
-            container_name="${PROJECT_NAME}-${service}-1"
-        fi
+        # Get container name using shared function
+        local container_name=$(get_container_name "$service")
         
-        if docker ps --format "{{.Names}}" | grep -q "^${container_name}$"; then
-            # Check health
-            local health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}' \
-                          "$container_name" 2>/dev/null)
-            
+        # Get service status using shared function
+        local status=$(get_service_status "$service")
+        
+        if [[ "$status" == running:* ]]; then
+            local health="${status#running:}"
             if [ "$health" = "healthy" ] || [ "$health" = "running" ]; then
                 if [ "$OUTPUT_FORMAT" != "json" ]; then
                     echo -e "${GREEN}✓${NC} $service is running"
@@ -247,7 +203,7 @@ utils_health() {
             fi
         else
             if [ "$OUTPUT_FORMAT" != "json" ]; then
-                echo -e "${RED}✗${NC} $service is not running"
+                echo -e "${RED}✗${NC} $service is $status"
             fi
             unhealthy=$((unhealthy + 1))
         fi
@@ -268,6 +224,5 @@ utils_health() {
 
 # Export functions
 export -f handle_doctor_command
-export -f check_requirements_cached
 export -f utils_doctor
 export -f utils_health

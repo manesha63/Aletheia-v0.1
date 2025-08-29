@@ -190,7 +190,7 @@ audit_env() {
         
         # Variable usage by service
         echo -e "${CYAN}Variable Usage by Service:${NC}"
-        for service in $($DOCKER_COMPOSE config --services 2>/dev/null | head -5); do
+        for service in $(get_all_services | head -5); do
             service_vars=$($DOCKER_COMPOSE config 2>/dev/null | \
                           awk "/^  $service:$/,/^  [a-z-]+:$/" | \
                           grep -oE '\$\{[A-Z_][A-Z0-9_]*(:?-[^}]*)?\}' | \

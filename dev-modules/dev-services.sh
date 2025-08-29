@@ -351,8 +351,8 @@ service_status() {
             continue
         fi
         
-        # Try to get health status for running containers
-        health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no check{{end}}' "$container" 2>/dev/null || echo "error")
+        # Get health status using shared function
+        health=$(get_service_health "$container")
         
         case "$health" in
             healthy)
@@ -470,8 +470,8 @@ service_shell() {
 # List available services
 service_list() {
     if [ "$OUTPUT_FORMAT" = "json" ]; then
-        # Get services from docker-compose config in JSON format
-        services=$($DOCKER_COMPOSE config --services 2>/dev/null)
+        # Get services using shared function
+        services=$(get_all_services)
         if [ -z "$services" ]; then
             echo '{"status":"error","message":"No services found"}'
         else
@@ -489,7 +489,7 @@ service_list() {
         fi
     else
         echo -e "${BLUE}Available Services:${NC}"
-        $DOCKER_COMPOSE config --services 2>/dev/null | while read service; do
+        get_all_services | while read service; do
             # Check if service is running
             if $DOCKER_COMPOSE ps "$service" 2>/dev/null | grep -q "Up\|Running"; then
                 echo -e "  ${GREEN}●${NC} $service (running)"

@@ -63,6 +63,8 @@ fi
 
 # Source common library first (contains shared functions)
 source "$SCRIPT_DIR/dev-modules/dev-lib.sh"
+# Source Docker common functions (shared Docker operations)
+source "$SCRIPT_DIR/dev-modules/dev-docker-common.sh"
 
 # Source all other modules
 source "$SCRIPT_DIR/dev-modules/dev-help.sh"

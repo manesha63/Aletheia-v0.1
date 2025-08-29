@@ -41,22 +41,17 @@ reconcile_status() {
         print_header "Service Reconciliation Report"
     fi
     
-    # Get services from docker-compose
+    # Get services using shared function
     local compose_services
-    compose_services=$($DOCKER_COMPOSE config --services 2>/dev/null | sort)
+    compose_services=$(get_all_services | sort)
     local compose_count=$(echo "$compose_services" | wc -l)
     
-    # Build service to container name mapping
+    # Build service to container name mapping using shared function
     local service_container_map="/tmp/service_container_map_$$"
     > "$service_container_map"
     
     for service in $compose_services; do
-        # Get the container_name if defined, otherwise use default naming
-        local container_name=$($DOCKER_COMPOSE config | grep -A 10 "^  $service:" | grep "container_name:" | awk '{print $2}')
-        if [ -z "$container_name" ]; then
-            # Default docker-compose naming: projectname-service-1
-            container_name="${PROJECT_NAME}-${service}-1"
-        fi
+        local container_name=$(get_container_name "$service")
         echo "$service:$container_name" >> "$service_container_map"
     done
     
@@ -228,7 +223,7 @@ reconcile_cleanup() {
     check_requirements
     
     # Find orphans
-    local compose_services=$($DOCKER_COMPOSE config --services 2>/dev/null)
+    local compose_services=$(get_all_services)
     local all_containers=$(docker ps -a --filter "label=com.docker.compose.project=${PROJECT_NAME}" --format "{{.Names}}")
     local orphans=""
     
@@ -283,7 +278,7 @@ reconcile_fix() {
     check_requirements
     
     # Find missing services
-    local compose_services=$($DOCKER_COMPOSE config --services 2>/dev/null)
+    local compose_services=$(get_all_services)
     local all_containers=$(docker ps -a --filter "label=com.docker.compose.project=${PROJECT_NAME}" --format "{{.Names}}")
     local missing=""
     

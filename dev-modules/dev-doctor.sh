@@ -5,12 +5,14 @@
 # ============================================================================
 # This module handles system diagnostics and health checks
 
-# Handle doctor command
+# Handle doctor command (legacy - redirects to check)
 handle_doctor_command() {
-    utils_doctor "$@"
+    # This function is kept for backward compatibility
+    # but now redirects to the unified check command
+    handle_check_command --docker "$@"
 }
 
-# System diagnostics
+# Legacy system diagnostics (kept for backward compatibility if called directly)
 utils_doctor() {
     if [ "$OUTPUT_FORMAT" != "json" ]; then
         print_header "Comprehensive System Diagnostics"
@@ -162,64 +164,11 @@ utils_doctor() {
     return $([ $issues -eq 0 ] && echo $EXIT_SUCCESS || echo $EXIT_CONFIG_ERROR)
 }
 
-# System health check
+# Legacy health check (redirects to new check command)
 utils_health() {
-    check_requirements || return $?
-    
-    if [ "$OUTPUT_FORMAT" != "json" ]; then
-        print_header "Service Health Check"
-    fi
-    
-    # Get all services using shared function
-    local all_services=$(get_all_services)
-    
-    # Get running containers
-    local healthy=0
-    local unhealthy=0
-    
-    if [ "$OUTPUT_FORMAT" != "json" ]; then
-        echo -e "${CYAN}Checking all services:${NC}"
-    fi
-    
-    for service in $all_services; do
-        # Get container name using shared function
-        local container_name=$(get_container_name "$service")
-        
-        # Get service status using shared function
-        local status=$(get_service_status "$service")
-        
-        if [[ "$status" == running:* ]]; then
-            local health="${status#running:}"
-            if [ "$health" = "healthy" ] || [ "$health" = "running" ]; then
-                if [ "$OUTPUT_FORMAT" != "json" ]; then
-                    echo -e "${GREEN}✓${NC} $service is running"
-                fi
-                healthy=$((healthy + 1))
-            else
-                if [ "$OUTPUT_FORMAT" != "json" ]; then
-                    echo -e "${YELLOW}⚠${NC} $service is $health"
-                fi
-                unhealthy=$((unhealthy + 1))
-            fi
-        else
-            if [ "$OUTPUT_FORMAT" != "json" ]; then
-                echo -e "${RED}✗${NC} $service is $status"
-            fi
-            unhealthy=$((unhealthy + 1))
-        fi
-    done
-    
-    if [ "$OUTPUT_FORMAT" = "json" ]; then
-        echo "{\"healthy\":$healthy,\"unhealthy\":$unhealthy}"
-    else
-        echo ""
-        echo -e "${CYAN}Summary:${NC}"
-        if [ $unhealthy -eq 0 ]; then
-            echo -e "${GREEN}✓ All services healthy${NC}"
-        else
-            echo -e "${YELLOW}⚠ $unhealthy service(s) not running${NC}"
-        fi
-    fi
+    # This function is kept for backward compatibility
+    # but now redirects to the unified check command
+    handle_check_command --health "$@"
 }
 
 # Export functions

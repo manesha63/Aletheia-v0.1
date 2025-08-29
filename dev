@@ -80,6 +80,7 @@ source "$SCRIPT_DIR/dev-modules/dev-n8n.sh"
 source "$SCRIPT_DIR/dev-modules/dev-reconcile.sh"
 source "$SCRIPT_DIR/dev-modules/dev-audit.sh"
 source "$SCRIPT_DIR/dev-modules/dev-deps.sh"
+source "$SCRIPT_DIR/dev-modules/dev-check.sh"
 
 # ============================================================================
 # Main Command Router
@@ -100,8 +101,13 @@ case "$1" in
         service_restart "$2"
         ;;
         
-    status|ps)
-        service_status "$@"
+    status)
+        service_status "${@:2}"
+        ;;
+        
+    ps)
+        # ps is now an alias to status
+        service_status "${@:2}"
         ;;
         
     logs|log)
@@ -131,15 +137,22 @@ case "$1" in
         ;;
         
     doctor)
-        handle_doctor_command
+        # Legacy command - redirect to new check --docker
+        handle_check_command --docker "${@:2}"
         ;;
         
     validate)
-        utils_validate
+        # Comprehensive validation - uses new check command
+        handle_check_command --all "${@:2}"
+        ;;
+        
+    check)
+        handle_check_command "${@:2}"
         ;;
         
     health)
-        utils_health
+        # Legacy command - redirect to new check --health
+        handle_check_command --health "${@:2}"
         ;;
         
     backup)

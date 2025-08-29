@@ -251,6 +251,7 @@ service_restart() {
 service_status() {
     local explain=false
     local verbose=false
+    local simple=false
     
     # Parse arguments
     for arg in "$@"; do
@@ -261,11 +262,66 @@ service_status() {
             --verbose|-v)
                 verbose=true
                 ;;
+            --simple)
+                simple=true
+                ;;
         esac
     done
     
     check_requirements
     
+    # Simple mode - just show service-level health (like old health command)
+    if [ "$simple" = true ]; then
+        if [ "$OUTPUT_FORMAT" != "json" ]; then
+            print_header "Service Health Status"
+            echo -e "${CYAN}Services:${NC}"
+        fi
+        
+        # Get all services and show simple status
+        local all_services=$(get_all_services)
+        local healthy=0
+        local unhealthy=0
+        
+        for service in $all_services; do
+            local status=$(get_service_status "$service")
+            
+            if [[ "$status" == running:* ]]; then
+                local health="${status#running:}"
+                if [ "$health" = "healthy" ] || [ "$health" = "running" ]; then
+                    if [ "$OUTPUT_FORMAT" != "json" ]; then
+                        echo -e "${GREEN}✓${NC} $service is running"
+                    fi
+                    healthy=$((healthy + 1))
+                else
+                    if [ "$OUTPUT_FORMAT" != "json" ]; then
+                        echo -e "${YELLOW}⚠${NC} $service is $health"
+                    fi
+                    unhealthy=$((unhealthy + 1))
+                fi
+            else
+                if [ "$OUTPUT_FORMAT" != "json" ]; then
+                    echo -e "${RED}✗${NC} $service is $status"
+                fi
+                unhealthy=$((unhealthy + 1))
+            fi
+        done
+        
+        if [ "$OUTPUT_FORMAT" = "json" ]; then
+            echo "{\"healthy\":$healthy,\"unhealthy\":$unhealthy}"
+        else
+            echo ""
+            echo -e "${CYAN}Summary:${NC}"
+            if [ $unhealthy -eq 0 ]; then
+                echo -e "${GREEN}✓ All services healthy${NC}"
+            else
+                echo -e "${YELLOW}⚠ $unhealthy service(s) not running${NC}"
+            fi
+        fi
+        
+        return
+    fi
+    
+    # Regular detailed mode
     if [ "$OUTPUT_FORMAT" != "json" ]; then
         print_header "Service Status"
         

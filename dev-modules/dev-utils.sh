@@ -36,8 +36,16 @@ handle_utils_command() {
     esac
 }
 
-# Validate system configuration
+# Validate system configuration (redirects to check)
 utils_validate() {
+    # This function is kept for backward compatibility
+    # but now redirects to the unified check command
+    handle_check_command --all "$@"
+    return $?
+}
+
+# Legacy validation function (kept if called directly)
+utils_validate_legacy() {
     # Parse arguments
     NON_INTERACTIVE=false
     FORCE=false

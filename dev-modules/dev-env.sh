@@ -11,11 +11,15 @@ handle_env_command() {
     shift
     
     case "$cmd" in
-        check)
+        check|status)
             env_check "$@"
             ;;
         list)
             env_list "$@"
+            ;;
+        audit)
+            # Call the audit env functionality
+            handle_audit_command env "$@"
             ;;
         ports)
             env_ports "$@"
@@ -24,11 +28,11 @@ handle_env_command() {
             if [ "$OUTPUT_FORMAT" = "json" ]; then
                 echo '{"status":"error","message":"Unknown environment command"}'
             else
-                echo "Usage: ./dev env [check|list]"
-                echo "  check - Verify all required variables are set"
-                echo "  list  - List all environment variables"
-                echo ""
-                echo "Or use: ./dev ports to show port configuration"
+                echo "Usage: ./dev env [status|list|audit|ports]"
+                echo "  status - Check environment configuration"
+                echo "  list   - List all environment variables"
+                echo "  audit  - Audit environment variables for issues"
+                echo "  ports  - Show port configuration"
             fi
             return $EXIT_CONFIG_ERROR
             ;;

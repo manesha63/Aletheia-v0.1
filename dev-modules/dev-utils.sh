@@ -17,8 +17,8 @@ handle_utils_command() {
         backup)
             utils_backup "$@"
             ;;
-        cleanup)
-            utils_cleanup "$@"
+        archive)
+            utils_archive "$@"
             ;;
         reload-nginx)
             utils_reload_nginx "$@"
@@ -260,8 +260,8 @@ utils_backup() {
     fi
 }
 
-# Archive old files
-utils_cleanup() {
+# Archive old files (safe operation - moves files to .archive/)
+utils_archive() {
     if [ "$OUTPUT_FORMAT" != "json" ]; then
         print_header "Archiving Old Files"
     fi
@@ -308,9 +308,18 @@ utils_cleanup() {
     found=$(find . -maxdepth 3 -name "*.bak" -o -name "*.backup*" 2>/dev/null | grep -v .archive | wc -l)
     if [ $found -gt 0 ]; then
         if [ "$OUTPUT_FORMAT" != "json" ]; then
-            echo -e "${YELLOW}Found $found backup files. Archive them? (y/N): ${NC}"
-            read -r response
-            if [[ "$response" =~ ^[Yy]$ ]]; then
+            # Use confirm_operation if available
+            if declare -f confirm_operation > /dev/null; then
+                if confirm_operation "Found $found backup files. Archive them?" "N"; then
+                    find . -maxdepth 3 \( -name "*.bak" -o -name "*.backup*" \) -not -path "./.archive/*" -exec mv {} .archive/misc/ \; 2>/dev/null
+                    echo -e "${GREEN}✓${NC} Archived backup files"
+                    total_moved=$((total_moved + found))
+                else
+                    echo "Skipped archiving backup files"
+                fi
+            else
+                # Non-interactive - auto archive
+                echo -e "${YELLOW}Found $found backup files, archiving...${NC}"
                 find . -maxdepth 3 \( -name "*.bak" -o -name "*.backup*" \) -not -path "./.archive/*" -exec mv {} .archive/misc/ \; 2>/dev/null
                 echo -e "${GREEN}✓${NC} Archived backup files"
                 total_moved=$((total_moved + found))
@@ -528,7 +537,7 @@ utils_verify_frontend() {
 export -f handle_utils_command
 export -f utils_validate
 export -f utils_backup
-export -f utils_cleanup
+export -f utils_archive
 export -f utils_reload_nginx
 export -f utils_seed_users
 export -f utils_verify_frontend

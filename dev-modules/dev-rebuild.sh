@@ -151,8 +151,8 @@ utils_rebuild() {
                 return $EXIT_SERVICE_UNAVAILABLE
             fi
         else
-            # Call the health check from doctor module
-            utils_health
+            # Call the health check using new check command
+            handle_check_command --health
         fi
     fi
     

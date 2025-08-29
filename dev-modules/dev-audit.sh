@@ -15,7 +15,9 @@ handle_audit_command() {
             audit_env "$@"
             ;;
         ports)
-            audit_ports "$@"
+            # Redirect to env ports
+            echo -e "${YELLOW}Note: 'audit ports' functionality has moved to 'env ports'${NC}"
+            env_ports "$@"
             ;;
         volumes)
             audit_volumes "$@"

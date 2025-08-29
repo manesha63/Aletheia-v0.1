@@ -29,11 +29,8 @@ handle_service_command() {
         shell|exec)
             service_shell "$@"
             ;;
-        clean)
-            service_clean "$@"
-            ;;
-        list)
-            service_list "$@"
+        purge)
+            service_purge "$@"
             ;;
         *)
             # If not a subcommand, it might be a main command
@@ -556,12 +553,12 @@ service_list() {
     fi
 }
 
-# Clean services and volumes (destructive)
-service_clean() {
-    if confirm_operation "WARNING: This will delete all data!" "N"; then
-        echo -e "${BLUE}Cleaning up...${NC}"
+# Purge services and volumes (destructive - deletes all data)
+service_purge() {
+    if confirm_operation "WARNING: This will DELETE ALL DATA and volumes!" "N"; then
+        echo -e "${RED}Purging all services and data...${NC}"
         $DOCKER_COMPOSE down -v
-        output_result "success" "Cleanup complete"
+        output_result "success" "All services and data purged"
     else
         if [ "$OUTPUT_FORMAT" = "json" ]; then
             echo '{"status":"cancelled","message":"User cancelled operation"}'
@@ -580,4 +577,4 @@ export -f service_status
 export -f service_logs
 export -f service_shell
 export -f service_list
-export -f service_clean
+export -f service_purge

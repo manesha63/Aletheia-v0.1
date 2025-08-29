@@ -118,12 +118,19 @@ case "$1" in
         service_shell "$2"
         ;;
         
-    services|list)
+    services)
         service_list
         ;;
         
+    purge)
+        service_purge
+        ;;
+        
     clean)
-        service_clean
+        # Legacy alias for purge - warn user
+        echo -e "${YELLOW}Warning: 'clean' is deprecated. Use 'purge' instead.${NC}"
+        echo -e "${YELLOW}This command will DELETE ALL DATA!${NC}"
+        service_purge
         ;;
         
     # Database Commands
@@ -163,8 +170,14 @@ case "$1" in
         handle_rebuild_command "${@:2}"
         ;;
         
+    archive)
+        utils_archive
+        ;;
+        
     cleanup)
-        utils_cleanup
+        # Legacy alias for archive - inform user
+        echo -e "${YELLOW}Note: 'cleanup' has been renamed to 'archive' for clarity.${NC}"
+        utils_archive
         ;;
         
     reload-nginx)
@@ -185,7 +198,8 @@ case "$1" in
         ;;
         
     ports)
-        env_ports
+        # Legacy - redirect to env ports
+        handle_env_command ports
         ;;
         
     # Documentation Commands
@@ -205,7 +219,21 @@ case "$1" in
         
     # Audit Commands
     audit)
-        handle_audit_command "$2" "${@:3}"
+        # Check if it's env or ports - redirect to new structure
+        case "$2" in
+            env|environment)
+                echo -e "${YELLOW}Note: 'audit env' has moved to 'env audit'${NC}"
+                handle_env_command audit "${@:3}"
+                ;;
+            ports)
+                echo -e "${YELLOW}Note: 'audit ports' has moved to 'env ports'${NC}"
+                handle_env_command ports "${@:3}"
+                ;;
+            *)
+                # Other audit commands stay as-is for now
+                handle_audit_command "$2" "${@:3}"
+                ;;
+        esac
         ;;
         
     # Dependency Commands

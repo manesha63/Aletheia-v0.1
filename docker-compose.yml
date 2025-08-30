@@ -173,8 +173,8 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - HOSTNAME=${SERVICE_HOST:-0.0.0.0}
-      # Direct DATABASE_URL for Prisma (using escaped password for special chars)
-      - "DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD_ESCAPED}@db:5432/lawyerchat"
+      # Direct DATABASE_URL for Prisma
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/lawyerchat
       # Keep individual vars for other uses
       - DB_HOST=db
       - DB_PORT=5432

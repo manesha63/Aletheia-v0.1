@@ -48,7 +48,7 @@ services:
       - N8N_HOST=${SERVICE_HOST:-0.0.0.0}
       - N8N_PORT=5678
       - NODE_ENV=production
-      - N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY}"  # Use environment variable
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       - N8N_RUNNERS_ENABLED=true
       - N8N_CORS_ENABLED=true

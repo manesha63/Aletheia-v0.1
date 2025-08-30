@@ -282,14 +282,10 @@ handle_n8n_command() {
                         exit $EXIT_SERVICE_UNAVAILABLE
                     fi
                     
-                    # List active workflows
+                    # List all workflows with status
                     echo ""
-                    echo -e "${CYAN}Active Workflows:${NC}"
-                    $DOCKER_COMPOSE exec -T n8n n8n list:workflow --active 2>/dev/null || echo "None"
-                    
-                    echo ""
-                    echo -e "${CYAN}Inactive Workflows:${NC}"
-                    $DOCKER_COMPOSE exec -T n8n n8n list:workflow --inactive 2>/dev/null || echo "None"
+                    echo -e "${CYAN}All Workflows:${NC}"
+                    $DOCKER_COMPOSE exec -T n8n n8n list:workflow 2>/dev/null || echo "None"
                     ;;
                     
                 *)

@@ -105,7 +105,7 @@ services:
       context: ./court-processor
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      # Use individual DB variables to avoid password escaping issues
       PYTHONPATH: /app
       COURTLISTENER_API_TOKEN: ${COURTLISTENER_API_TOKEN}
       PACER_USERNAME: ${PACER_USERNAME}
@@ -194,7 +194,7 @@ services:
       - N8N_API_SECRET=${N8N_API_SECRET}
       - N8N_AUTH_BYPASS=${N8N_AUTH_BYPASS:-false}
       # Court Processor API config
-      - COURT_API_BASE_URL=${COURT_API_BASE_URL}
+      - COURT_API_BASE_URL=http://court-processor:8104
       - NEXT_PUBLIC_COURT_API_URL=${NEXT_PUBLIC_COURT_API_URL}
       - NEXT_PUBLIC_MAX_DOCUMENT_SELECTIONS=${NEXT_PUBLIC_MAX_DOCUMENT_SELECTIONS}
       - NEXT_PUBLIC_ENABLE_DOCUMENT_SELECTION=${NEXT_PUBLIC_ENABLE_DOCUMENT_SELECTION}

@@ -173,7 +173,14 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - HOSTNAME=${SERVICE_HOST:-0.0.0.0}
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/lawyerchat
+      # Direct DATABASE_URL for Prisma (escaped special characters)
+      - "DATABASE_URL=postgresql://${DB_USER}:SecurePass123\\!@db:5432/lawyerchat"
+      # Keep individual vars for other uses
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=lawyerchat
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - NEXTAUTH_URL=http://localhost:${WEB_PORT}/chat
       - NEXT_PUBLIC_NEXTAUTH_URL=http://localhost:${WEB_PORT}/chat

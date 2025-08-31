@@ -1453,6 +1453,303 @@ EOF
             fi
             ;;
             
+        test)
+            workflow_name="$1"
+            test_data="$2"
+            shift
+            
+            if [ -z "$workflow_name" ]; then
+                echo "Usage: ./dev n8n test <workflow-name> [test-data]"
+                echo ""
+                echo "Test workflows by triggering them with data"
+                echo ""
+                echo "Examples:"
+                echo "  ./dev n8n test Main"
+                echo "  ./dev n8n test Main '{\"message\":\"test\"}'"
+                echo "  ./dev n8n test --all"
+                echo ""
+                echo "Options:"
+                echo "  --all        Test all active workflows"
+                echo "  --webhook    Test via webhook endpoint"
+                exit 1
+            fi
+            
+            echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+            echo -e "${BLUE}     n8n Workflow Testing${NC}"
+            echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+            echo ""
+            
+            if [ "$workflow_name" = "--all" ]; then
+                echo -e "${CYAN}Testing all active workflows...${NC}"
+                echo ""
+                
+                # Get all active workflows
+                active_workflows=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                    "SELECT id, name FROM workflow_entity WHERE active=1;" 2>/dev/null)
+                
+                if [ -z "$active_workflows" ]; then
+                    echo -e "${YELLOW}No active workflows found${NC}"
+                    exit 1
+                fi
+                
+                success_count=0
+                fail_count=0
+                
+                echo "$active_workflows" | while IFS='|' read -r id name; do
+                    echo -e "${CYAN}Testing:${NC} $name (ID: $id)"
+                    
+                    # Try to execute the workflow
+                    if docker exec aletheia_development-n8n-1 n8n execute --id="$id" 2>&1 | grep -q "Execution was successful"; then
+                        echo -e "  ${GREEN}✓${NC} Success"
+                        ((success_count++))
+                    else
+                        echo -e "  ${RED}✗${NC} Failed"
+                        ((fail_count++))
+                    fi
+                    echo ""
+                done
+                
+                echo -e "${CYAN}Test Summary:${NC}"
+                echo -e "  Successful: ${GREEN}$success_count${NC}"
+                echo -e "  Failed: ${RED}$fail_count${NC}"
+                
+            elif [ "$workflow_name" = "--webhook" ]; then
+                shift
+                echo -e "${CYAN}Testing webhook endpoint...${NC}"
+                
+                webhook_url="http://localhost:${N8N_PORT:-8100}/webhook/${N8N_WEBHOOK_ID}"
+                test_payload="${1:-{\"test\":true\}}"
+                
+                echo "URL: $webhook_url"
+                echo "Payload: $test_payload"
+                echo ""
+                
+                response=$(curl -s -w "\n%{http_code}" -X POST "$webhook_url" \
+                    -H "Content-Type: application/json" \
+                    -d "$test_payload" 2>/dev/null)
+                
+                http_code=$(echo "$response" | tail -n1)
+                body=$(echo "$response" | sed '$d')
+                
+                if [ "$http_code" = "200" ]; then
+                    echo -e "${GREEN}✓${NC} Webhook test successful (HTTP $http_code)"
+                    echo "Response: $body"
+                else
+                    echo -e "${RED}✗${NC} Webhook test failed (HTTP $http_code)"
+                    echo "Response: $body"
+                    echo ""
+                    echo -e "${YELLOW}Troubleshooting:${NC}"
+                    echo "  1. Check if Main workflow is active: ./dev n8n workflows list"
+                    echo "  2. Verify webhook ID matches: echo \$N8N_WEBHOOK_ID"
+                    echo "  3. Check n8n logs: ./dev n8n logs"
+                fi
+                
+            else
+                # Test specific workflow
+                echo -e "${CYAN}Testing workflow:${NC} $workflow_name"
+                
+                # Get workflow ID
+                workflow_id=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                    "SELECT id FROM workflow_entity WHERE name='$workflow_name' LIMIT 1;" 2>/dev/null)
+                
+                if [ -z "$workflow_id" ]; then
+                    echo -e "${RED}✗ Workflow '$workflow_name' not found${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Available workflows:${NC}"
+                    docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "SELECT name FROM workflow_entity;" 2>/dev/null | sed 's/^/  - /'
+                    exit 1
+                fi
+                
+                # Check if workflow is active
+                is_active=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                    "SELECT active FROM workflow_entity WHERE id='$workflow_id';" 2>/dev/null)
+                
+                if [ "$is_active" != "1" ]; then
+                    echo -e "${YELLOW}⚠ Workflow is inactive${NC}"
+                    echo -e "${YELLOW}Fix:${NC} ./dev n8n workflows activate $workflow_name"
+                fi
+                
+                echo "Workflow ID: $workflow_id"
+                echo ""
+                
+                # Execute the workflow
+                echo -e "${CYAN}Executing workflow...${NC}"
+                
+                if [ -n "$test_data" ]; then
+                    # With test data - need to create a temporary file
+                    echo "$test_data" > /tmp/n8n_test_data.json
+                    docker cp /tmp/n8n_test_data.json aletheia_development-n8n-1:/tmp/test_data.json
+                    result=$(docker exec aletheia_development-n8n-1 n8n execute --id="$workflow_id" --input=/tmp/test_data.json 2>&1)
+                    rm -f /tmp/n8n_test_data.json
+                else
+                    result=$(docker exec aletheia_development-n8n-1 n8n execute --id="$workflow_id" 2>&1)
+                fi
+                
+                if echo "$result" | grep -q "Execution was successful"; then
+                    echo -e "${GREEN}✓ Workflow executed successfully${NC}"
+                    echo ""
+                    echo "Output:"
+                    echo "$result" | grep -A5 "Result:" || echo "$result" | tail -10
+                else
+                    echo -e "${RED}✗ Workflow execution failed${NC}"
+                    echo ""
+                    echo "Error output:"
+                    echo "$result" | grep -i "error" | head -5
+                    echo ""
+                    echo -e "${YELLOW}Troubleshooting:${NC}"
+                    echo "  1. Check credentials: ./dev n8n validate"
+                    echo "  2. View full logs: ./dev n8n logs"
+                    echo "  3. Fix workflow: ./dev n8n workflow fix $workflow_name"
+                fi
+            fi
+            ;;
+            
+        workflow)
+            shift
+            subcommand="$1"
+            shift
+            
+            case "$subcommand" in
+                fix)
+                    workflow_name="$1"
+                    
+                    if [ -z "$workflow_name" ]; then
+                        echo "Usage: ./dev n8n workflow fix <workflow-name|--all>"
+                        echo ""
+                        echo "Automatically fix common workflow issues"
+                        echo ""
+                        echo "Fixes:"
+                        echo "  • Missing credentials"
+                        echo "  • Inactive workflows"
+                        echo "  • Broken node references"
+                        echo "  • Missing webhook IDs"
+                        exit 1
+                    fi
+                    
+                    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+                    echo -e "${BLUE}     Workflow Auto-Fix${NC}"
+                    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+                    echo ""
+                    
+                    fix_workflow() {
+                        local wf_name="$1"
+                        local wf_id="$2"
+                        local issues_found=false
+                        
+                        echo -e "${CYAN}Checking:${NC} $wf_name"
+                        
+                        # Check if workflow exists
+                        if [ -z "$wf_id" ]; then
+                            wf_id=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                "SELECT id FROM workflow_entity WHERE name='$wf_name' LIMIT 1;" 2>/dev/null)
+                        fi
+                        
+                        if [ -z "$wf_id" ]; then
+                            echo -e "  ${RED}✗${NC} Workflow not found"
+                            echo -e "  ${YELLOW}Fix:${NC} ./dev n8n workflows import"
+                            return 1
+                        fi
+                        
+                        # Check if active
+                        is_active=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                            "SELECT active FROM workflow_entity WHERE id='$wf_id';" 2>/dev/null)
+                        
+                        if [ "$is_active" != "1" ]; then
+                            echo -e "  ${YELLOW}⚠${NC} Workflow is inactive"
+                            echo -e "  ${CYAN}Fixing:${NC} Activating workflow..."
+                            docker exec aletheia_development-n8n-1 n8n update:workflow --id="$wf_id" --active=true >/dev/null 2>&1
+                            echo -e "  ${GREEN}✓${NC} Activated"
+                            issues_found=true
+                        fi
+                        
+                        # Check for Postgres credential if it's the Main workflow
+                        if [ "$wf_name" = "Main" ]; then
+                            postgres_cred=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                "SELECT id FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null)
+                            
+                            if [ -z "$postgres_cred" ]; then
+                                echo -e "  ${YELLOW}⚠${NC} Missing Postgres credential"
+                                echo -e "  ${CYAN}Fixing:${NC} Creating credential..."
+                                handle_n8n_command credentials create-postgres
+                                echo -e "  ${GREEN}✓${NC} Created Postgres credential"
+                                issues_found=true
+                            fi
+                            
+                            # Check for Anthropic credential
+                            anthropic_cred=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                "SELECT COUNT(*) FROM credentials_entity WHERE type='anthropicApi';" 2>/dev/null)
+                            
+                            if [ "$anthropic_cred" = "0" ]; then
+                                echo -e "  ${YELLOW}⚠${NC} Missing Anthropic credential"
+                                if [ -n "$ANTHROPIC_API_KEY" ]; then
+                                    echo -e "  ${CYAN}Fixing:${NC} Creating from environment..."
+                                    handle_n8n_command credentials update anthropic
+                                    echo -e "  ${GREEN}✓${NC} Created Anthropic credential"
+                                    issues_found=true
+                                else
+                                    echo -e "  ${YELLOW}Action needed:${NC} Set ANTHROPIC_API_KEY and run:"
+                                    echo "    export ANTHROPIC_API_KEY='your-key'"
+                                    echo "    ./dev n8n credentials update anthropic"
+                                fi
+                            fi
+                        fi
+                        
+                        # Export workflow to check for issues
+                        workflow_json=$(docker exec aletheia_development-n8n-1 n8n export:workflow --id="$wf_id" --pretty 2>/dev/null)
+                        
+                        # Check for webhook nodes
+                        if echo "$workflow_json" | grep -q "n8n-nodes-base.webhook"; then
+                            if [ -z "$N8N_WEBHOOK_ID" ]; then
+                                echo -e "  ${YELLOW}⚠${NC} Webhook ID not configured"
+                                echo -e "  ${YELLOW}Action:${NC} Add to .env: N8N_WEBHOOK_ID=<your-webhook-id>"
+                                issues_found=true
+                            fi
+                        fi
+                        
+                        if [ "$issues_found" = false ]; then
+                            echo -e "  ${GREEN}✓${NC} No issues found"
+                        fi
+                        
+                        echo ""
+                    }
+                    
+                    if [ "$workflow_name" = "--all" ]; then
+                        echo -e "${CYAN}Fixing all workflows...${NC}"
+                        echo ""
+                        
+                        workflows=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                            "SELECT id, name FROM workflow_entity;" 2>/dev/null)
+                        
+                        echo "$workflows" | while IFS='|' read -r id name; do
+                            fix_workflow "$name" "$id"
+                        done
+                        
+                        echo -e "${GREEN}═══════════════════════════════════════════${NC}"
+                        echo -e "${GREEN}     Auto-fix complete!${NC}"
+                        echo -e "${GREEN}═══════════════════════════════════════════${NC}"
+                    else
+                        fix_workflow "$workflow_name"
+                        
+                        echo -e "${CYAN}Next steps:${NC}"
+                        echo "  1. Test the workflow: ./dev n8n test $workflow_name"
+                        echo "  2. Check logs if issues persist: ./dev n8n logs"
+                    fi
+                    ;;
+                    
+                *)
+                    echo "Usage: ./dev n8n workflow <command>"
+                    echo ""
+                    echo "Commands:"
+                    echo "  fix <name|--all>  - Auto-fix workflow issues"
+                    echo ""
+                    echo "Examples:"
+                    echo "  ./dev n8n workflow fix Main"
+                    echo "  ./dev n8n workflow fix --all"
+                    ;;
+            esac
+            ;;
+            
         shell)
             echo -e "${BLUE}Opening n8n shell...${NC}"
             $DOCKER_COMPOSE exec n8n /bin/sh
@@ -1464,8 +1761,10 @@ EOF
             echo "Commands:"
             echo "  init         - Complete setup wizard (recommended for first time)"
             echo "  validate     - Health check and validation"
+            echo "  test         - Test workflow execution"
+            echo "  workflow     - Fix and manage individual workflows"
             echo "  setup        - Run initial n8n owner account setup"
-            echo "  workflows    - Manage n8n workflows"
+            echo "  workflows    - Manage n8n workflows (bulk operations)"
             echo "  nodes        - Manage custom nodes"
             echo "  credentials  - Manage credentials"
             echo "  config       - Manage n8n configuration"
@@ -1473,13 +1772,15 @@ EOF
             echo "  shell        - Open n8n container shell"
             echo ""
             echo "Quick Start:"
-            echo "  ./dev n8n init      # Complete setup wizard"
-            echo "  ./dev n8n validate  # Check everything is working"
+            echo "  ./dev n8n init              # Complete setup wizard"
+            echo "  ./dev n8n validate          # Check everything is working"
+            echo "  ./dev n8n test Main         # Test Main workflow"
+            echo "  ./dev n8n workflow fix Main # Fix workflow issues"
             echo ""
             echo "Examples:"
-            echo "  ./dev n8n workflows list"
+            echo "  ./dev n8n test --webhook    # Test webhook endpoint"
+            echo "  ./dev n8n workflow fix --all # Fix all workflows"
             echo "  ./dev n8n credentials update --all"
-            echo "  ./dev n8n nodes build"
             ;;
     esac
 }

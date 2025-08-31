@@ -105,10 +105,6 @@ case "$1" in
         service_status "${@:2}"
         ;;
         
-    ps)
-        # ps is now an alias to status
-        service_status "${@:2}"
-        ;;
         
     logs|log)
         service_logs "$2"
@@ -126,12 +122,6 @@ case "$1" in
         service_purge
         ;;
         
-    clean)
-        # Legacy alias for purge - warn user
-        echo -e "${YELLOW}Warning: 'clean' is deprecated. Use 'purge' instead.${NC}"
-        echo -e "${YELLOW}This command will DELETE ALL DATA!${NC}"
-        service_purge
-        ;;
         
     # Database Commands
     db)
@@ -143,24 +133,12 @@ case "$1" in
         handle_setup_command "${@:2}"
         ;;
         
-    doctor)
-        # Legacy command - redirect to new check --docker
-        handle_check_command --docker "${@:2}"
-        ;;
         
-    validate)
-        # Comprehensive validation - uses new check command
-        handle_check_command --all "${@:2}"
-        ;;
         
     check)
         handle_check_command "${@:2}"
         ;;
         
-    health)
-        # Legacy command - redirect to new check --health
-        handle_check_command --health "${@:2}"
-        ;;
         
     backup)
         utils_backup
@@ -174,11 +152,6 @@ case "$1" in
         utils_archive
         ;;
         
-    cleanup)
-        # Legacy alias for archive - inform user
-        echo -e "${YELLOW}Note: 'cleanup' has been renamed to 'archive' for clarity.${NC}"
-        utils_archive
-        ;;
         
     reload-nginx)
         utils_reload_nginx
@@ -197,10 +170,6 @@ case "$1" in
         handle_env_command "$2" "${@:3}"
         ;;
         
-    ports)
-        # Legacy - redirect to env ports
-        handle_env_command ports
-        ;;
         
     # Documentation Commands
     docs)
@@ -217,24 +186,6 @@ case "$1" in
         handle_reconcile_command "$2" "${@:3}"
         ;;
         
-    # Audit Commands
-    audit)
-        # Check if it's env or ports - redirect to new structure
-        case "$2" in
-            env|environment)
-                echo -e "${YELLOW}Note: 'audit env' has moved to 'env audit'${NC}"
-                handle_env_command audit "${@:3}"
-                ;;
-            ports)
-                echo -e "${YELLOW}Note: 'audit ports' has moved to 'env ports'${NC}"
-                handle_env_command ports "${@:3}"
-                ;;
-            *)
-                # Other audit commands stay as-is for now
-                handle_audit_command "$2" "${@:3}"
-                ;;
-        esac
-        ;;
         
     # Dependency Commands
     deps|dependencies)

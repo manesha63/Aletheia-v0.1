@@ -11,20 +11,21 @@ handle_check_command() {
     local subcommand="$1"
     shift
     
+    # Support both old --flag style and new subcommand style for backward compatibility
     case "$subcommand" in
-        --health|health)
+        health|--health)
             check_health "$@"
             ;;
-        --docker|docker)
+        docker|--docker)
             check_docker "$@"
             ;;
-        --env|env)
+        env|--env)
             check_env "$@"
             ;;
-        --ports|ports)
+        ports|--ports)
             check_ports "$@"
             ;;
-        --all|"")
+        all|--all|"")
             # Default comprehensive check
             check_comprehensive "$@"
             ;;
@@ -33,7 +34,8 @@ handle_check_command() {
                 echo '{"status":"error","message":"Unknown check subcommand: '$subcommand'"}'
             else
                 echo -e "${RED}Unknown check subcommand: $subcommand${NC}"
-                echo "Usage: ./dev check [--health|--docker|--env|--ports|--all]"
+                echo "Usage: ./dev check [health|docker|env|ports]"
+                echo "       ./dev check         # Run all checks"
             fi
             return $EXIT_INVALID_ARGUMENT
             ;;

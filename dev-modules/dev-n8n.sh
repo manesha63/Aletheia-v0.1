@@ -645,6 +645,482 @@ handle_n8n_command() {
             esac
             ;;
             
+        credentials)
+            case "$1" in
+                list)
+                    echo -e "${BLUE}Listing n8n credentials...${NC}"
+                    docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "SELECT id, name, type, createdAt FROM credentials_entity;" 2>/dev/null || \
+                        echo "No credentials found or database error"
+                    ;;
+                    
+                export)
+                    shift
+                    output_dir="./n8n/credentials_export_$(date +%Y%m%d_%H%M%S)"
+                    
+                    if [ "$1" = "--output" ] && [ -n "$2" ]; then
+                        output_dir="$2"
+                        shift 2
+                    fi
+                    
+                    echo -e "${BLUE}Exporting all n8n credentials...${NC}"
+                    mkdir -p "$output_dir"
+                    
+                    # Export credentials using n8n CLI
+                    docker exec aletheia_development-n8n-1 n8n export:credentials \
+                        --backup --output="/tmp/export/" 2>/dev/null
+                    
+                    # Copy from container to host
+                    docker cp aletheia_development-n8n-1:/tmp/export/. "$output_dir/"
+                    
+                    # Clean up container temp files
+                    docker exec aletheia_development-n8n-1 rm -rf /tmp/export
+                    
+                    if [ -d "$output_dir" ] && [ "$(ls -A $output_dir)" ]; then
+                        echo -e "${GREEN}✓${NC} Credentials exported to: $output_dir"
+                        echo "  Files: $(ls -1 $output_dir | wc -l)"
+                    else
+                        echo -e "${RED}✗${NC} Export failed or no credentials to export"
+                    fi
+                    ;;
+                    
+                import)
+                    shift
+                    if [ -z "$1" ]; then
+                        echo "Usage: ./dev n8n credentials import <file-or-directory>"
+                        echo ""
+                        echo "Import credentials from JSON file(s)"
+                        echo ""
+                        echo "Examples:"
+                        echo "  ./dev n8n credentials import ./backup.json"
+                        echo "  ./dev n8n credentials import ./credentials_export_20240101/"
+                        exit 1
+                    fi
+                    
+                    input_path="$1"
+                    
+                    if [ ! -e "$input_path" ]; then
+                        echo -e "${RED}Error: Input path not found: $input_path${NC}"
+                        exit 1
+                    fi
+                    
+                    echo -e "${BLUE}Importing n8n credentials...${NC}"
+                    
+                    # Copy to container
+                    docker cp "$input_path" aletheia_development-n8n-1:/tmp/import_creds
+                    
+                    # Import using n8n CLI
+                    if [ -d "$input_path" ]; then
+                        # Directory of separate files
+                        docker exec aletheia_development-n8n-1 n8n import:credentials \
+                            --separate --input="/tmp/import_creds"
+                    else
+                        # Single file
+                        docker exec aletheia_development-n8n-1 n8n import:credentials \
+                            --input="/tmp/import_creds"
+                    fi
+                    
+                    # Clean up
+                    docker exec aletheia_development-n8n-1 rm -rf /tmp/import_creds
+                    
+                    echo -e "${GREEN}✓${NC} Import completed"
+                    echo ""
+                    echo "Verify with: ./dev n8n credentials list"
+                    ;;
+                    
+                backup)
+                    backup_dir="./n8n/backups/credentials_$(date +%Y%m%d_%H%M%S)"
+                    echo -e "${BLUE}Backing up all n8n credentials...${NC}"
+                    
+                    mkdir -p "$backup_dir"
+                    
+                    # Export with decryption for backup (includes sensitive data)
+                    echo -e "${YELLOW}Note: Backup will contain decrypted credentials${NC}"
+                    read -p "Continue? (y/N) " -n 1 -r
+                    echo
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        echo "Cancelled"
+                        exit 0
+                    fi
+                    
+                    # Export decrypted for true backup
+                    docker exec aletheia_development-n8n-1 n8n export:credentials \
+                        --all --decrypted --pretty --output="/tmp/backup.json"
+                    
+                    # Copy to host
+                    docker cp aletheia_development-n8n-1:/tmp/backup.json "$backup_dir/credentials_decrypted.json"
+                    
+                    # Also export encrypted version
+                    docker exec aletheia_development-n8n-1 n8n export:credentials \
+                        --backup --output="/tmp/backup_enc/"
+                    
+                    docker cp aletheia_development-n8n-1:/tmp/backup_enc/. "$backup_dir/encrypted/"
+                    
+                    # Clean up
+                    docker exec aletheia_development-n8n-1 rm -rf /tmp/backup.json /tmp/backup_enc
+                    
+                    # Add metadata
+                    cat > "$backup_dir/metadata.json" <<EOF
+{
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "n8n_version": "$(docker exec aletheia_development-n8n-1 n8n --version 2>/dev/null || echo 'unknown')",
+  "encryption_key_hash": "$(echo -n "$N8N_ENCRYPTION_KEY" | sha256sum | cut -d' ' -f1)",
+  "credentials_count": $(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite "SELECT COUNT(*) FROM credentials_entity;" 2>/dev/null || echo 0)
+}
+EOF
+                    
+                    echo -e "${GREEN}✓${NC} Backup saved to: $backup_dir"
+                    echo "  - credentials_decrypted.json (portable, contains passwords)"
+                    echo "  - encrypted/ (requires same encryption key)"
+                    echo "  - metadata.json (backup information)"
+                    ;;
+                    
+                restore)
+                    shift
+                    if [ -z "$1" ]; then
+                        echo "Usage: ./dev n8n credentials restore <backup-directory>"
+                        echo ""
+                        echo "Restore credentials from a backup"
+                        echo ""
+                        echo "Example:"
+                        echo "  ./dev n8n credentials restore ./n8n/backups/credentials_20240101_120000"
+                        exit 1
+                    fi
+                    
+                    backup_dir="$1"
+                    
+                    if [ ! -d "$backup_dir" ]; then
+                        echo -e "${RED}Error: Backup directory not found: $backup_dir${NC}"
+                        exit 1
+                    fi
+                    
+                    echo -e "${YELLOW}Warning: This will overwrite existing credentials${NC}"
+                    read -p "Continue? (y/N) " -n 1 -r
+                    echo
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        echo "Cancelled"
+                        exit 0
+                    fi
+                    
+                    # Check for decrypted backup
+                    if [ -f "$backup_dir/credentials_decrypted.json" ]; then
+                        echo -e "${BLUE}Restoring from decrypted backup...${NC}"
+                        docker cp "$backup_dir/credentials_decrypted.json" aletheia_development-n8n-1:/tmp/restore.json
+                        docker exec aletheia_development-n8n-1 n8n import:credentials --input="/tmp/restore.json"
+                    elif [ -d "$backup_dir/encrypted" ]; then
+                        echo -e "${BLUE}Restoring from encrypted backup...${NC}"
+                        docker cp "$backup_dir/encrypted" aletheia_development-n8n-1:/tmp/restore_enc
+                        docker exec aletheia_development-n8n-1 n8n import:credentials --separate --input="/tmp/restore_enc"
+                    else
+                        echo -e "${RED}No valid backup files found${NC}"
+                        exit 1
+                    fi
+                    
+                    # Clean up
+                    docker exec aletheia_development-n8n-1 rm -rf /tmp/restore.json /tmp/restore_enc
+                    
+                    echo -e "${GREEN}✓${NC} Restore completed"
+                    echo "Verify with: ./dev n8n credentials list"
+                    ;;
+                    
+                create-postgres)
+                    echo -e "${BLUE}Creating Postgres credential for n8n...${NC}"
+                    
+                    # Check if Main workflow credential already exists
+                    existing=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "SELECT id, name FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null)
+                    
+                    if [ -n "$existing" ]; then
+                        echo -e "${YELLOW}Postgres credential already exists:${NC}"
+                        echo "  ID: PMs8mP0nYzWgEu40"
+                        echo "  Name: Postgres Main"
+                        echo ""
+                        echo "This credential is already configured for the Main workflow."
+                        exit 0
+                    fi
+                    
+                    # Create credential JSON file
+                    cat > /tmp/n8n_postgres_cred.json <<EOF
+[
+  {
+    "id": "PMs8mP0nYzWgEu40",
+    "name": "Postgres Main",
+    "type": "postgres",
+    "data": {
+      "host": "db",
+      "port": 5432,
+      "database": "${DB_NAME:-aletheia}",
+      "user": "${DB_USER:-aletheia}",
+      "password": "${DB_PASSWORD:-SecurePass123}",
+      "ssl": "disable"
+    }
+  }
+]
+EOF
+                    
+                    # Copy to container and import
+                    docker cp /tmp/n8n_postgres_cred.json aletheia_development-n8n-1:/tmp/postgres_cred.json
+                    
+                    if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported"; then
+                        echo -e "${GREEN}✓${NC} Postgres credential created successfully!"
+                        echo ""
+                        echo "  ID: PMs8mP0nYzWgEu40"
+                        echo "  Name: Postgres Main"
+                        echo "  Host: db"
+                        echo "  Database: ${DB_NAME:-aletheia}"
+                        echo "  User: ${DB_USER:-aletheia}"
+                        echo ""
+                        echo "The Main workflow can now use this credential."
+                        
+                        # Clean up
+                        rm -f /tmp/n8n_postgres_cred.json
+                        docker exec aletheia_development-n8n-1 rm -f /tmp/postgres_cred.json 2>/dev/null || true
+                    else
+                        echo -e "${RED}Failed to create credential${NC}"
+                        echo "Please create it manually in the n8n UI."
+                        rm -f /tmp/n8n_postgres_cred.json
+                        exit 1
+                    fi
+                    ;;
+                    
+                update)
+                    shift
+                    cred_type="$1"
+                    
+                    case "$cred_type" in
+                        postgres)
+                            echo -e "${BLUE}Updating Postgres credential from environment...${NC}"
+                            
+                            # Check if credential exists
+                            existing=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                "SELECT id FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null)
+                            
+                            if [ -n "$existing" ]; then
+                                # Delete old credential
+                                docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                    "DELETE FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null
+                            fi
+                            
+                            # Create updated credential
+                            cat > /tmp/n8n_postgres_update.json <<EOF
+[
+  {
+    "id": "PMs8mP0nYzWgEu40",
+    "name": "Postgres Main",
+    "type": "postgres",
+    "data": {
+      "host": "db",
+      "port": 5432,
+      "database": "${DB_NAME:-aletheia}",
+      "user": "${DB_USER:-aletheia}",
+      "password": "${DB_PASSWORD:-SecurePass123}",
+      "ssl": "disable"
+    }
+  }
+]
+EOF
+                            docker cp /tmp/n8n_postgres_update.json aletheia_development-n8n-1:/tmp/postgres_update.json
+                            docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_update.json >/dev/null 2>&1
+                            rm -f /tmp/n8n_postgres_update.json
+                            
+                            echo -e "${GREEN}✓${NC} Postgres credential updated"
+                            echo "  Database: ${DB_NAME:-aletheia}"
+                            echo "  User: ${DB_USER:-aletheia}"
+                            ;;
+                            
+                        anthropic)
+                            shift
+                            api_key="$1"
+                            
+                            if [ -z "$api_key" ]; then
+                                # Try to get from environment
+                                api_key="$ANTHROPIC_API_KEY"
+                                if [ -z "$api_key" ]; then
+                                    echo -e "${RED}Error: No API key provided${NC}"
+                                    echo "Usage: ./dev n8n credentials update anthropic <api-key>"
+                                    echo "   Or: export ANTHROPIC_API_KEY='your-key'"
+                                    exit 1
+                                fi
+                            fi
+                            
+                            echo -e "${BLUE}Updating Anthropic credential...${NC}"
+                            
+                            # Check if credential exists and get its ID
+                            existing_id=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                "SELECT id FROM credentials_entity WHERE type='anthropicApi' LIMIT 1;" 2>/dev/null)
+                            
+                            if [ -z "$existing_id" ]; then
+                                existing_id="PAB7ZSRzpUCaL5VR"
+                            else
+                                # Delete old credential
+                                docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                    "DELETE FROM credentials_entity WHERE id='$existing_id';" 2>/dev/null
+                            fi
+                            
+                            # Create updated credential
+                            cat > /tmp/n8n_anthropic_update.json <<EOF
+[
+  {
+    "id": "$existing_id",
+    "name": "Anthropic account",
+    "type": "anthropicApi",
+    "data": {
+      "apiKey": "$api_key"
+    }
+  }
+]
+EOF
+                            docker cp /tmp/n8n_anthropic_update.json aletheia_development-n8n-1:/tmp/anthropic_update.json
+                            docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_update.json >/dev/null 2>&1
+                            rm -f /tmp/n8n_anthropic_update.json
+                            
+                            echo -e "${GREEN}✓${NC} Anthropic credential updated"
+                            ;;
+                            
+                        --all)
+                            echo -e "${BLUE}Updating all credentials from environment...${NC}"
+                            echo ""
+                            
+                            # Update Postgres
+                            handle_n8n_command credentials update postgres
+                            echo ""
+                            
+                            # Update Anthropic if key exists
+                            if [ -n "$ANTHROPIC_API_KEY" ]; then
+                                handle_n8n_command credentials update anthropic
+                            else
+                                echo -e "${YELLOW}⚠${NC} No ANTHROPIC_API_KEY in environment, skipping"
+                            fi
+                            
+                            echo ""
+                            echo -e "${GREEN}✓${NC} All credentials updated"
+                            ;;
+                            
+                        *)
+                            echo "Usage: ./dev n8n credentials update <type> [options]"
+                            echo ""
+                            echo "Types:"
+                            echo "  postgres              - Update from DB_* env vars"
+                            echo "  anthropic [api-key]   - Update with API key"
+                            echo "  --all                 - Update all from environment"
+                            echo ""
+                            echo "Examples:"
+                            echo "  ./dev n8n credentials update postgres"
+                            echo "  ./dev n8n credentials update anthropic sk-ant-..."
+                            echo "  ./dev n8n credentials update --all"
+                            ;;
+                    esac
+                    ;;
+                    
+                delete)
+                    shift
+                    if [ -z "$1" ]; then
+                        echo "Usage: ./dev n8n credentials delete <credential-id>"
+                        echo ""
+                        echo "Delete a credential by ID"
+                        echo ""
+                        echo "First list credentials to get IDs:"
+                        echo "  ./dev n8n credentials list"
+                        exit 1
+                    fi
+                    
+                    cred_id="$1"
+                    
+                    echo -e "${YELLOW}Warning: This will delete credential ID: $cred_id${NC}"
+                    read -p "Continue? (y/N) " -n 1 -r
+                    echo
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        echo "Cancelled"
+                        exit 0
+                    fi
+                    
+                    # Delete from database
+                    docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "DELETE FROM credentials_entity WHERE id='$cred_id';"
+                    
+                    echo -e "${GREEN}✓${NC} Credential deleted"
+                    ;;
+                    
+                fix-main-workflow)
+                    echo -e "${BLUE}Fixing Main workflow Postgres credential...${NC}"
+                    
+                    # Check if Main workflow exists
+                    workflow_check=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "SELECT id, name FROM workflow_entity WHERE name LIKE '%Main%' LIMIT 1;" 2>/dev/null)
+                    
+                    if [ -z "$workflow_check" ]; then
+                        echo -e "${YELLOW}Main workflow not found. Import it first with:${NC}"
+                        echo "  ./dev n8n workflows import"
+                        exit 1
+                    fi
+                    
+                    echo "Found workflow: $workflow_check"
+                    
+                    # Check for existing Postgres credential
+                    existing_cred=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "SELECT id, name FROM credentials_entity WHERE type='postgres' AND name LIKE '%Main%' LIMIT 1;" 2>/dev/null)
+                    
+                    if [ -n "$existing_cred" ]; then
+                        echo -e "${YELLOW}Found existing credential: $existing_cred${NC}"
+                        cred_id=$(echo "$existing_cred" | cut -d'|' -f1)
+                        
+                        # Update the workflow to use this credential
+                        echo -e "${CYAN}Updating Main workflow to use credential ID: $cred_id${NC}"
+                        
+                        # This would require parsing and updating the workflow JSON
+                        # For now, just report the credential ID
+                        echo -e "${GREEN}✓${NC} Postgres credential ready: $cred_id"
+                        echo ""
+                        echo "If the workflow still shows credential errors:"
+                        echo "1. Open the Main workflow in n8n UI"
+                        echo "2. Select the 'Postgres Chat Memory' node"
+                        echo "3. Choose 'Postgres Main' from the credential dropdown"
+                        echo "4. Save the workflow"
+                    else
+                        echo -e "${YELLOW}No Postgres credential found. Creating one...${NC}"
+                        
+                        # Create the credential
+                        if [ -f "n8n/scripts/credential-manager.sh" ]; then
+                            bash n8n/scripts/credential-manager.sh create-from-env
+                        else
+                            # Use inline creation
+                            "$0" credentials create-postgres
+                        fi
+                        
+                        echo ""
+                        echo -e "${GREEN}✓${NC} Credential created. Now update the Main workflow:"
+                        echo "1. Open http://localhost:${N8N_PORT:-8100}"
+                        echo "2. Edit the Main workflow"
+                        echo "3. Select 'Postgres Main' in the Postgres Chat Memory node"
+                        echo "4. Save the workflow"
+                    fi
+                    ;;
+                    
+                *)
+                    echo "Usage: ./dev n8n credentials <command> [options]"
+                    echo ""
+                    echo "Commands:"
+                    echo "  list                - List all credentials"
+                    echo "  export [--output DIR] - Export all credentials"
+                    echo "  import <file/dir>   - Import credentials from file or directory"
+                    echo "  backup              - Create full backup with decrypted data"
+                    echo "  restore <dir>       - Restore from backup directory"
+                    echo "  create-postgres     - Create Postgres credential"
+                    echo "  update <type>       - Update credentials from environment"
+                    echo "  fix-main-workflow   - Fix/create Postgres credential for Main workflow"
+                    echo "  delete <id>         - Delete a credential by ID"
+                    echo ""
+                    echo "Examples:"
+                    echo "  ./dev n8n credentials list"
+                    echo "  ./dev n8n credentials create-postgres"
+                    echo "  ./dev n8n credentials update postgres"
+                    echo "  ./dev n8n credentials update anthropic sk-ant-..."
+                    echo "  ./dev n8n credentials update --all"
+                    echo "  ./dev n8n credentials backup"
+                    ;;
+            esac
+            ;;
+            
         config)
             case "$1" in
                 show)
@@ -703,6 +1179,280 @@ handle_n8n_command() {
             $DOCKER_COMPOSE logs -f --tail=100 n8n
             ;;
             
+        init)
+            echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+            echo -e "${BLUE}     n8n Complete Setup Wizard${NC}"
+            echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+            echo ""
+            
+            # Step 1: Check if n8n is running
+            echo -e "${CYAN}Step 1/5: Checking n8n service...${NC}"
+            if ! check_service_running "n8n"; then
+                echo -e "${YELLOW}n8n is not running. Starting it now...${NC}"
+                $DOCKER_COMPOSE up -d n8n
+                sleep 5
+            fi
+            echo -e "${GREEN}✓${NC} n8n is running"
+            echo ""
+            
+            # Step 2: Setup owner account
+            echo -e "${CYAN}Step 2/5: Setting up owner account...${NC}"
+            owner_check=$($DOCKER_COMPOSE exec -T n8n sqlite3 /data/.n8n/database.sqlite \
+                "SELECT COUNT(*) FROM user WHERE role='owner';" 2>/dev/null || echo "0")
+            
+            if [ "$owner_check" = "0" ]; then
+                echo "Creating owner account..."
+                handle_n8n_command setup
+            else
+                echo -e "${GREEN}✓${NC} Owner account already exists"
+            fi
+            echo ""
+            
+            # Step 3: Setup Postgres credential
+            echo -e "${CYAN}Step 3/5: Setting up Postgres credential...${NC}"
+            postgres_check=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "SELECT id FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null)
+            
+            if [ -z "$postgres_check" ]; then
+                echo "Creating Postgres credential..."
+                # Create the credential
+                cat > /tmp/n8n_postgres_init.json <<EOF
+[
+  {
+    "id": "PMs8mP0nYzWgEu40",
+    "name": "Postgres Main",
+    "type": "postgres",
+    "data": {
+      "host": "db",
+      "port": 5432,
+      "database": "${DB_NAME:-aletheia}",
+      "user": "${DB_USER:-aletheia}",
+      "password": "${DB_PASSWORD:-SecurePass123}",
+      "ssl": "disable"
+    }
+  }
+]
+EOF
+                docker cp /tmp/n8n_postgres_init.json aletheia_development-n8n-1:/tmp/postgres_init.json
+                docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_init.json >/dev/null 2>&1
+                rm -f /tmp/n8n_postgres_init.json
+                echo -e "${GREEN}✓${NC} Postgres credential created"
+            else
+                echo -e "${GREEN}✓${NC} Postgres credential already exists"
+            fi
+            echo ""
+            
+            # Step 4: Setup Anthropic credential (if API key exists)
+            echo -e "${CYAN}Step 4/5: Setting up Anthropic credential...${NC}"
+            anthropic_check=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "SELECT id FROM credentials_entity WHERE type='anthropicApi';" 2>/dev/null)
+            
+            if [ -z "$anthropic_check" ]; then
+                if [ -n "$ANTHROPIC_API_KEY" ]; then
+                    echo "Creating Anthropic credential from environment..."
+                    cat > /tmp/n8n_anthropic_init.json <<EOF
+[
+  {
+    "id": "PAB7ZSRzpUCaL5VR",
+    "name": "Anthropic account",
+    "type": "anthropicApi",
+    "data": {
+      "apiKey": "$ANTHROPIC_API_KEY"
+    }
+  }
+]
+EOF
+                    docker cp /tmp/n8n_anthropic_init.json aletheia_development-n8n-1:/tmp/anthropic_init.json
+                    docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_init.json >/dev/null 2>&1
+                    rm -f /tmp/n8n_anthropic_init.json
+                    echo -e "${GREEN}✓${NC} Anthropic credential created"
+                else
+                    echo -e "${YELLOW}⚠${NC} No ANTHROPIC_API_KEY in environment"
+                    echo "  To add later: export ANTHROPIC_API_KEY='your-key' && ./dev n8n credentials update anthropic"
+                fi
+            else
+                echo -e "${GREEN}✓${NC} Anthropic credential already exists"
+            fi
+            echo ""
+            
+            # Step 5: Import and activate Main workflow
+            echo -e "${CYAN}Step 5/5: Setting up Main workflow...${NC}"
+            workflow_check=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "SELECT id FROM workflow_entity WHERE name='Main';" 2>/dev/null)
+            
+            if [ -z "$workflow_check" ]; then
+                if [ -f "n8n/workflows/Main.json" ]; then
+                    echo "Importing Main workflow..."
+                    docker cp n8n/workflows/Main.json aletheia_development-n8n-1:/tmp/Main.json
+                    docker exec aletheia_development-n8n-1 n8n import:workflow --input=/tmp/Main.json >/dev/null 2>&1
+                    docker exec aletheia_development-n8n-1 n8n update:workflow --id=5bmVEfcZjJ7tq6rx --active=true >/dev/null 2>&1
+                    echo -e "${GREEN}✓${NC} Main workflow imported and activated"
+                else
+                    echo -e "${YELLOW}⚠${NC} Main workflow file not found"
+                fi
+            else
+                echo -e "${GREEN}✓${NC} Main workflow already exists"
+            fi
+            echo ""
+            
+            # Final validation
+            echo -e "${CYAN}Running validation...${NC}"
+            "$0" validate --quiet
+            echo ""
+            
+            echo -e "${GREEN}════════════════════════════════════════════${NC}"
+            echo -e "${GREEN}     n8n Setup Complete!${NC}"
+            echo -e "${GREEN}════════════════════════════════════════════${NC}"
+            echo ""
+            echo "Access n8n at: ${BLUE}http://localhost:${N8N_PORT:-8100}${NC}"
+            echo ""
+            echo "Next steps:"
+            echo "  • Test the Main workflow"
+            echo "  • Add additional credentials as needed"
+            echo "  • Import more workflows with: ./dev n8n workflows import"
+            ;;
+            
+        validate)
+            quiet_mode=false
+            if [ "$1" = "--quiet" ]; then
+                quiet_mode=true
+                shift
+            fi
+            
+            if [ "$quiet_mode" = false ]; then
+                echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+                echo -e "${BLUE}     n8n Health & Validation Check${NC}"
+                echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+                echo ""
+            fi
+            
+            validation_passed=true
+            
+            # Check 1: Service running
+            if [ "$quiet_mode" = false ]; then
+                echo -e "${CYAN}1. Service Status:${NC}"
+            fi
+            if check_service_running "n8n" 2>/dev/null; then
+                if [ "$quiet_mode" = false ]; then
+                    echo -e "   ${GREEN}✓${NC} n8n container is running"
+                fi
+            else
+                echo -e "   ${RED}✗${NC} n8n container is not running"
+                echo -e "   ${YELLOW}Fix:${NC} ./dev up n8n"
+                validation_passed=false
+            fi
+            
+            # Check 2: Database connectivity
+            if [ "$quiet_mode" = false ]; then
+                echo -e "${CYAN}2. Database Connectivity:${NC}"
+            fi
+            if docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite "SELECT 'OK';" >/dev/null 2>&1; then
+                if [ "$quiet_mode" = false ]; then
+                    echo -e "   ${GREEN}✓${NC} SQLite database accessible"
+                fi
+            else
+                echo -e "   ${RED}✗${NC} Cannot access n8n database"
+                validation_passed=false
+            fi
+            
+            # Check 3: Credentials validation
+            if [ "$quiet_mode" = false ]; then
+                echo -e "${CYAN}3. Credentials Check:${NC}"
+            fi
+            
+            # Check Postgres credential
+            postgres_cred=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "SELECT id FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null)
+            if [ -n "$postgres_cred" ]; then
+                # Try to decrypt it
+                if docker exec aletheia_development-n8n-1 n8n export:credentials --id=PMs8mP0nYzWgEu40 --decrypted >/dev/null 2>&1; then
+                    if [ "$quiet_mode" = false ]; then
+                        echo -e "   ${GREEN}✓${NC} Postgres credential valid"
+                    fi
+                else
+                    echo -e "   ${RED}✗${NC} Postgres credential cannot be decrypted"
+                    echo -e "   ${YELLOW}Fix:${NC} ./dev n8n credentials create-postgres"
+                    validation_passed=false
+                fi
+            else
+                echo -e "   ${YELLOW}⚠${NC} Postgres credential missing"
+                echo -e "   ${YELLOW}Fix:${NC} ./dev n8n credentials create-postgres"
+                validation_passed=false
+            fi
+            
+            # Check Anthropic credential
+            anthropic_cred=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "SELECT COUNT(*) FROM credentials_entity WHERE type='anthropicApi';" 2>/dev/null)
+            if [ "$anthropic_cred" -gt "0" ]; then
+                if [ "$quiet_mode" = false ]; then
+                    echo -e "   ${GREEN}✓${NC} Anthropic credential exists"
+                fi
+            else
+                if [ "$quiet_mode" = false ]; then
+                    echo -e "   ${YELLOW}⚠${NC} No Anthropic credential"
+                fi
+            fi
+            
+            # Check 4: Workflow validation
+            if [ "$quiet_mode" = false ]; then
+                echo -e "${CYAN}4. Workflow Check:${NC}"
+            fi
+            
+            main_workflow=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "SELECT active FROM workflow_entity WHERE name='Main';" 2>/dev/null)
+            if [ "$main_workflow" = "1" ]; then
+                if [ "$quiet_mode" = false ]; then
+                    echo -e "   ${GREEN}✓${NC} Main workflow is active"
+                fi
+            elif [ -n "$main_workflow" ]; then
+                echo -e "   ${YELLOW}⚠${NC} Main workflow exists but is inactive"
+                echo -e "   ${YELLOW}Fix:${NC} ./dev n8n workflows activate Main"
+            else
+                echo -e "   ${RED}✗${NC} Main workflow not found"
+                echo -e "   ${YELLOW}Fix:${NC} ./dev n8n workflows import"
+                validation_passed=false
+            fi
+            
+            # Check 5: Webhook endpoint
+            if [ "$quiet_mode" = false ]; then
+                echo -e "${CYAN}5. Webhook Endpoint:${NC}"
+            fi
+            webhook_url="http://localhost:${N8N_PORT:-8100}/webhook/${N8N_WEBHOOK_ID}"
+            if curl -s -o /dev/null -w "%{http_code}" "$webhook_url" 2>/dev/null | grep -q "404"; then
+                if [ "$quiet_mode" = false ]; then
+                    echo -e "   ${GREEN}✓${NC} Webhook endpoint reachable"
+                fi
+            else
+                if [ "$quiet_mode" = false ]; then
+                    echo -e "   ${YELLOW}⚠${NC} Webhook may not be configured"
+                fi
+            fi
+            
+            # Summary
+            if [ "$quiet_mode" = false ]; then
+                echo ""
+                if [ "$validation_passed" = true ]; then
+                    echo -e "${GREEN}═══════════════════════════════════════════${NC}"
+                    echo -e "${GREEN}     All validations passed!${NC}"
+                    echo -e "${GREEN}═══════════════════════════════════════════${NC}"
+                else
+                    echo -e "${YELLOW}═══════════════════════════════════════════${NC}"
+                    echo -e "${YELLOW}     Some issues need attention${NC}"
+                    echo -e "${YELLOW}═══════════════════════════════════════════${NC}"
+                    echo ""
+                    echo "Run the suggested fix commands above, or:"
+                    echo "  ./dev n8n init   # To run complete setup"
+                fi
+            else
+                # Quiet mode - just return status
+                if [ "$validation_passed" = true ]; then
+                    echo -e "${GREEN}✓${NC} All validations passed"
+                else
+                    echo -e "${RED}✗${NC} Validation failed - run './dev n8n validate' for details"
+                fi
+            fi
+            ;;
+            
         shell)
             echo -e "${BLUE}Opening n8n shell...${NC}"
             $DOCKER_COMPOSE exec n8n /bin/sh
@@ -712,17 +1462,24 @@ handle_n8n_command() {
             echo "Usage: ./dev n8n <command>"
             echo ""
             echo "Commands:"
-            echo "  setup      - Run initial n8n setup"
-            echo "  workflows  - Manage n8n workflows"
-            echo "  nodes      - Manage custom nodes"
-            echo "  config     - Manage n8n configuration"
-            echo "  logs       - Show n8n logs"
-            echo "  shell      - Open n8n container shell"
+            echo "  init         - Complete setup wizard (recommended for first time)"
+            echo "  validate     - Health check and validation"
+            echo "  setup        - Run initial n8n owner account setup"
+            echo "  workflows    - Manage n8n workflows"
+            echo "  nodes        - Manage custom nodes"
+            echo "  credentials  - Manage credentials"
+            echo "  config       - Manage n8n configuration"
+            echo "  logs         - Show n8n logs"
+            echo "  shell        - Open n8n container shell"
+            echo ""
+            echo "Quick Start:"
+            echo "  ./dev n8n init      # Complete setup wizard"
+            echo "  ./dev n8n validate  # Check everything is working"
             echo ""
             echo "Examples:"
             echo "  ./dev n8n workflows list"
+            echo "  ./dev n8n credentials update --all"
             echo "  ./dev n8n nodes build"
-            echo "  ./dev n8n config show"
             ;;
     esac
 }

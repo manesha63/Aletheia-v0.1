@@ -1465,7 +1465,7 @@ EOF
                 echo ""
                 echo "Examples:"
                 echo "  ./dev n8n test Main"
-                echo "  ./dev n8n test Main '{\"message\":\"test\"}'"
+                echo "  ./dev n8n test Main '{\"sessionKey\":\"test-123\",\"message\":\"Hello\"}'"
                 echo "  ./dev n8n test --all"
                 echo ""
                 echo "Options:"
@@ -1514,11 +1514,10 @@ EOF
                 echo -e "  Failed: ${RED}$fail_count${NC}"
                 
             elif [ "$workflow_name" = "--webhook" ]; then
-                shift
                 echo -e "${CYAN}Testing webhook endpoint...${NC}"
                 
                 webhook_url="http://localhost:${N8N_PORT:-8100}/webhook/${N8N_WEBHOOK_ID}"
-                test_payload="${1:-{\"test\":true\}}"
+                test_payload="${test_data:-{\"sessionKey\":\"test-session\",\"message\":\"Hello\"}}"
                 
                 echo "URL: $webhook_url"
                 echo "Payload: $test_payload"

@@ -258,21 +258,13 @@ handle_n8n_command() {
                     ;;
                     
                 execute)
-                    if [ -z "$2" ]; then
-                        echo "Usage: ./dev n8n workflows execute <workflow-id>"
-                        exit 1
-                    fi
-                    echo -e "${BLUE}Executing workflow $2...${NC}"
-                    if ! check_service_running "n8n"; then
-                        exit $EXIT_SERVICE_UNAVAILABLE
-                    fi
-                    
-                    if $DOCKER_COMPOSE exec -T n8n n8n execute --id="$2" 2>/dev/null; then
-                        echo -e "${GREEN}Workflow executed successfully${NC}"
-                    else
-                        echo -e "${RED}Failed to execute workflow${NC}"
-                        exit 1
-                    fi
+                    echo -e "${YELLOW}Note: 'workflows execute' is deprecated. Use 'n8n test' instead.${NC}"
+                    echo "Usage: ./dev n8n test <workflow-name>"
+                    echo ""
+                    echo "Examples:"
+                    echo "  ./dev n8n test Main                    # Test by name"
+                    echo "  ./dev n8n test webhook                 # Test via webhook"
+                    exit 1
                     ;;
                     
                 status)
@@ -1460,17 +1452,22 @@ EOF
             
             if [ -z "$workflow_name" ]; then
                 echo "Usage: ./dev n8n test <workflow-name> [test-data]"
+                echo "       ./dev n8n test webhook [test-data]"
                 echo ""
                 echo "Test workflows by triggering them with data"
                 echo ""
-                echo "Examples:"
-                echo "  ./dev n8n test Main"
-                echo "  ./dev n8n test Main '{\"sessionKey\":\"test-123\",\"message\":\"Hello\"}'"
-                echo "  ./dev n8n test --all"
-                echo ""
-                echo "Options:"
+                echo "Methods:"
+                echo "  webhook      Test Main workflow via HTTP webhook (recommended)"
+                echo "  <name>       Test specific workflow by name (via n8n CLI)"
                 echo "  --all        Test all active workflows"
-                echo "  --webhook    Test via webhook endpoint"
+                echo ""
+                echo "Examples:"
+                echo "  ./dev n8n test webhook                          # Test Main via webhook"
+                echo "  ./dev n8n test webhook '{\"message\":\"Hello\"}' # With custom data"
+                echo "  ./dev n8n test DocumentSearch                   # Test specific workflow"
+                echo "  ./dev n8n test --all                            # Test all workflows"
+                echo ""
+                echo "Note: All methods require n8n to be running"
                 exit 1
             fi
             
@@ -1513,12 +1510,21 @@ EOF
                 echo -e "  Successful: ${GREEN}$success_count${NC}"
                 echo -e "  Failed: ${RED}$fail_count${NC}"
                 
-            elif [ "$workflow_name" = "--webhook" ]; then
-                echo -e "${CYAN}Testing webhook endpoint...${NC}"
+            elif [ "$workflow_name" = "--webhook" ] || [ "$workflow_name" = "webhook" ]; then
+                echo -e "${CYAN}Testing Main workflow via webhook endpoint...${NC}"
+                
+                # Check if n8n is running
+                if ! check_service_running "n8n" 2>/dev/null; then
+                    echo -e "${RED}✗ n8n is not running${NC}"
+                    echo ""
+                    echo "Please start n8n first: ./dev up n8n"
+                    exit 1
+                fi
                 
                 webhook_url="http://localhost:${N8N_PORT:-8100}/webhook/${N8N_WEBHOOK_ID}"
                 test_payload="${test_data:-{\"sessionKey\":\"test-session\",\"message\":\"Hello\"}}"
                 
+                echo "Method: HTTP POST"
                 echo "URL: $webhook_url"
                 echo "Payload: $test_payload"
                 echo ""
@@ -1532,7 +1538,16 @@ EOF
                 
                 if [ "$http_code" = "200" ]; then
                     echo -e "${GREEN}✓${NC} Webhook test successful (HTTP $http_code)"
-                    echo "Response: $body"
+                    echo ""
+                    echo "Response:"
+                    if [ -n "$body" ]; then
+                        echo "$body" | head -20
+                        if [ $(echo "$body" | wc -l) -gt 20 ]; then
+                            echo "... (response truncated)"
+                        fi
+                    else
+                        echo "(empty response)"
+                    fi
                 else
                     echo -e "${RED}✗${NC} Webhook test failed (HTTP $http_code)"
                     echo "Response: $body"
@@ -1544,8 +1559,16 @@ EOF
                 fi
                 
             else
-                # Test specific workflow
-                echo -e "${CYAN}Testing workflow:${NC} $workflow_name"
+                # Test specific workflow via n8n CLI
+                echo -e "${CYAN}Testing workflow via n8n CLI:${NC} $workflow_name"
+                
+                # Check if n8n is running
+                if ! check_service_running "n8n" 2>/dev/null; then
+                    echo -e "${RED}✗ n8n is not running${NC}"
+                    echo ""
+                    echo "Please start n8n first: ./dev up n8n"
+                    exit 1
+                fi
                 
                 # Get workflow ID
                 workflow_id=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \

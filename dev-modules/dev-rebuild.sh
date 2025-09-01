@@ -15,26 +15,35 @@ utils_rebuild() {
     check_requirements
     check_env
     
-    # Parse arguments
+    # Parse arguments - support both old flags and new subcommands
     SERVICE=""
     HARD_CLEAN=false
     VERIFY=false
     
     for arg in "$@"; do
         case "$arg" in
-            --hard)
+            --hard|hard)
                 HARD_CLEAN=true
                 ;;
-            --verify)
+            --verify|verify)
                 VERIFY=true
                 ;;
             -*)
                 echo -e "${RED}Unknown option: $arg${NC}"
-                echo "Usage: ./dev rebuild [service] [--hard] [--verify]"
+                echo "Usage: ./dev rebuild [service|hard|verify]"
+                echo "Examples:"
+                echo "  ./dev rebuild              # Rebuild all services"
+                echo "  ./dev rebuild n8n          # Rebuild specific service"
+                echo "  ./dev rebuild hard         # Hard rebuild (aggressive cache clear)"
+                echo "  ./dev rebuild hard verify  # Hard rebuild with verification"
                 return $EXIT_CONFIG_ERROR
                 ;;
             *)
-                if [ -z "$SERVICE" ]; then
+                # Check if it's a service name or a command
+                if [ "$arg" = "hard" ] || [ "$arg" = "verify" ]; then
+                    # Already handled above
+                    :
+                elif [ -z "$SERVICE" ]; then
                     SERVICE="$arg"
                 fi
                 ;;

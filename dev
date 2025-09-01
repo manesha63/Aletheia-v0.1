@@ -181,14 +181,20 @@ case "$1" in
         handle_n8n_command "$2" "${@:3}"
         ;;
         
-    # Reconciliation Commands
-    reconcile)
+    # System Intelligence Commands  
+    find-orphans|reconcile)
+        if [ "$1" = "reconcile" ]; then
+            echo -e "${YELLOW}Note: 'reconcile' has been renamed to 'find-orphans' for clarity${NC}"
+        fi
         handle_reconcile_command "$2" "${@:3}"
         ;;
         
         
     # Dependency Commands
-    deps|dependencies)
+    dependencies|deps)
+        if [ "$1" = "deps" ]; then
+            echo -e "${YELLOW}Note: 'deps' has been renamed to 'dependencies' for clarity${NC}"
+        fi
         handle_deps_command "$2" "${@:3}"
         ;;
         

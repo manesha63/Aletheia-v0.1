@@ -246,24 +246,45 @@ service_restart() {
 
 # Show service status
 service_status() {
-    local explain=false
+    local mode="full"  # Default mode
     local verbose=false
-    local simple=false
     
-    # Parse arguments
+    # Parse arguments - support both old flags and new subcommands
     for arg in "$@"; do
         case "$arg" in
-            --explain)
-                explain=true
+            --explain|explain)
+                mode="explain"
                 ;;
-            --verbose|-v)
+            --simple|simple)
+                mode="simple"
+                ;;
+            --verbose|-v|verbose)
                 verbose=true
                 ;;
-            --simple)
-                simple=true
+            *)
+                # If first arg is a mode name, use it
+                if [ "$arg" = "$1" ]; then
+                    case "$arg" in
+                        simple|explain|full)
+                            mode="$arg"
+                            ;;
+                    esac
+                fi
                 ;;
         esac
     done
+    
+    # Set flags based on mode for backward compatibility
+    local explain=false
+    local simple=false
+    case "$mode" in
+        explain)
+            explain=true
+            ;;
+        simple)
+            simple=true
+            ;;
+    esac
     
     check_requirements
     

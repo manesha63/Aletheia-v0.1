@@ -48,7 +48,8 @@ show_help() {
     echo -e "${CYAN}n8n Automation:${NC}"
     echo "  n8n init        Complete setup wizard (credentials, workflows, etc.)"
     echo "  n8n validate    Health check with actionable fixes"
-    echo "  n8n test        Test workflow execution"
+    echo "  n8n test webhook Test Main workflow via HTTP (recommended)"
+    echo "  n8n test <name> Test any workflow by name"
     echo "  n8n workflow fix Auto-fix workflow issues"
     echo "  n8n workflows   Manage workflows (list, import, export, activate)"
     echo "  n8n credentials Manage credentials (create, update, backup)"
@@ -86,8 +87,9 @@ show_help() {
     echo "  ./dev deps --order        # Show optimal startup order"
     echo ""
     echo "  # n8n Automation:"
+    echo "  ./dev n8n test webhook       # Test Main workflow via HTTP"
     echo "  ./dev n8n monitor executions # Real-time execution monitor"
-    echo "  ./dev n8n query stats    # View execution statistics"
+    echo "  ./dev n8n query stats        # View execution statistics"
 }
 
 # Function to show n8n help

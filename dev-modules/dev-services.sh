@@ -214,8 +214,8 @@ service_up() {
                 echo -e "${BLUE}Initializing lawyer-chat database...${NC}"
                 
                 # Drop any conflicting views that might prevent Prisma from syncing
-                $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -c \
-                    "DROP VIEW IF EXISTS workflow_summary_stats CASCADE;" &>/dev/null
+                $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d lawyerchat -c \
+                    "DROP VIEW IF EXISTS workflow_summary_stats CASCADE;" &>/dev/null 2>&1
                 
                 # Check if lawyer-chat service directory exists
                 if [ -d "services/lawyer-chat" ]; then
@@ -223,7 +223,7 @@ service_up() {
                     
                     # URL-encode the password to handle special characters
                     ENCODED_PASSWORD=$(url_encode "${DB_PASSWORD}")
-                    export DATABASE_URL="postgresql://${DB_USER:-aletheia}:${ENCODED_PASSWORD}@localhost:${POSTGRES_PORT:-8200}/${DB_NAME:-aletheia}"
+                    export DATABASE_URL="postgresql://${DB_USER:-aletheia}:${ENCODED_PASSWORD}@localhost:${POSTGRES_PORT:-8200}/lawyerchat"
                     
                     if npx prisma db push --skip-generate &>/dev/null 2>&1; then
                         echo -e "${GREEN}✓ Database schema created${NC}"
@@ -232,16 +232,22 @@ service_up() {
                         if npx prisma generate &>/dev/null 2>&1; then
                             echo -e "${GREEN}✓ Prisma client generated${NC}"
                             
-                            # Seed demo users
-                            if [ -f "scripts/seed-users.cjs" ]; then
-                                if node scripts/seed-users.cjs &>/dev/null 2>&1; then
-                                    echo -e "${GREEN}✓ Demo users created:${NC}"
-                                    echo "    • demo@reichmanjorgensen.com / demo123"
-                                    echo "    • admin@reichmanjorgensen.com / admin123"
-                                else
-                                    echo -e "${YELLOW}⚠ Failed to seed demo users${NC}"
-                                    echo "  You can manually run: cd services/lawyer-chat && node scripts/seed-users.cjs"
-                                fi
+                            # Seed demo users - Always use SQL insertion as it's more reliable
+                            echo -e "${BLUE}Creating demo users...${NC}"
+                            DEMO_HASH='$2a$12$/H5nSVmw7n/0MR2ymCXLiOKJcvZVRHcVZYXjGvK5qBe8JqIJAj5ey'
+                            ADMIN_HASH='$2a$12$GpJRXfLZzZW7T9fKZKnkVuW9C6aGXqJT9RqY0P8pVJvWQQIqvLg76'
+                            
+                            if $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d lawyerchat -c \
+                                "INSERT INTO \"User\" (id, email, name, password, role, \"emailVerified\", \"createdAt\", \"updatedAt\") 
+                                 VALUES ('demo-'||gen_random_uuid(), 'demo@reichmanjorgensen.com', 'Demo User', '${DEMO_HASH}', 'USER', NOW(), NOW(), NOW()),
+                                        ('admin-'||gen_random_uuid(), 'admin@reichmanjorgensen.com', 'Admin User', '${ADMIN_HASH}', 'ADMIN', NOW(), NOW(), NOW()) 
+                                 ON CONFLICT (email) DO UPDATE SET password = EXCLUDED.password, \"updatedAt\" = NOW();" &>/dev/null 2>&1; then
+                                echo -e "${GREEN}✓ Demo users created:${NC}"
+                                echo "    • demo@reichmanjorgensen.com / demo123"
+                                echo "    • admin@reichmanjorgensen.com / admin123"
+                            else
+                                echo -e "${YELLOW}⚠ Could not create demo users (may already exist)${NC}"
+                            fi
                             elif [ -f "prisma/seed.ts" ]; then
                                 if npx tsx prisma/seed.ts &>/dev/null 2>&1; then
                                     echo -e "${GREEN}✓ Demo users created:${NC}"

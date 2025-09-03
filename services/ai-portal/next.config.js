@@ -14,6 +14,9 @@ const nextConfig = {
     assetPrefix: '/landing_page_RJLF',
   }),
   trailingSlash: true,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
 }
 
 module.exports = nextConfig

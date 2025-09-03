@@ -325,7 +325,9 @@ services:
 
   # Haystack RAG service for document processing
   haystack-service:
-    image: data_compose-haystack-service:latest
+    build:
+      context: ./n8n/haystack-service
+      dockerfile: Dockerfile
     container_name: haystack-judicial
     ports:
       - "${HAYSTACK_PORT:-8000}:8000"

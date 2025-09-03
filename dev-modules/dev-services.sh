@@ -234,8 +234,9 @@ service_up() {
                             
                             # Seed demo users - Always use SQL insertion as it's more reliable
                             echo -e "${BLUE}Creating demo users...${NC}"
-                            DEMO_HASH='$2a$12$/H5nSVmw7n/0MR2ymCXLiOKJcvZVRHcVZYXjGvK5qBe8JqIJAj5ey'
-                            ADMIN_HASH='$2a$12$GpJRXfLZzZW7T9fKZKnkVuW9C6aGXqJT9RqY0P8pVJvWQQIqvLg76'
+                            # These are the CORRECT hashes for demo123 and admin123 (verified with bcryptjs)
+                            DEMO_HASH='$2a$12$FlggC69ExCZaqqaLv.d6gOfWIZJbRdLtfAfNz/dZw0JTohCblKliq'
+                            ADMIN_HASH='$2a$12$B3GQNcs5JCDCBKA3zpxBG.r5ESM75LTtdAiqChGlFoUf3g6F8A9zq'
                             
                             if $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d lawyerchat -c \
                                 "INSERT INTO \"User\" (id, email, name, password, role, \"emailVerified\", \"createdAt\", \"updatedAt\") 
@@ -268,10 +269,10 @@ service_up() {
                 if [ "$USER_COUNT" = "0" ] || [ -z "$USER_COUNT" ]; then
                     echo -e "${BLUE}Seeding demo users...${NC}"
                     
-                    # Seed demo users directly in database with correct bcrypt hashes
-                    # These hashes are for demo123 and admin123 with cost factor 12
-                    DEMO_HASH='$2a$12$/H5nSVmw7n/0MR2ymCXLiOKJcvZVRHcVZYXjGvK5qBe8JqIJAj5ey'
-                    ADMIN_HASH='$2a$12$GpJRXfLZzZW7T9fKZKnkVuW9C6aGXqJT9RqY0P8pVJvWQQIqvLg76'
+                    # Seed demo users directly in database with CORRECT bcrypt hashes
+                    # These are verified hashes for demo123 and admin123 with cost factor 12
+                    DEMO_HASH='$2a$12$FlggC69ExCZaqqaLv.d6gOfWIZJbRdLtfAfNz/dZw0JTohCblKliq'
+                    ADMIN_HASH='$2a$12$B3GQNcs5JCDCBKA3zpxBG.r5ESM75LTtdAiqChGlFoUf3g6F8A9zq'
                     
                     if $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d lawyerchat -c \
                         "INSERT INTO \"User\" (id, email, name, password, role, \"emailVerified\", \"createdAt\", \"updatedAt\") 

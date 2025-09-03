@@ -25,9 +25,9 @@ verify_credentials() {
         return 1
     fi
     
-    # Expected hashes for demo123 and admin123
-    EXPECTED_DEMO='$2a$12$/H5nSVmw7n/0MR2ymCXLiOKJcvZVRHcVZYXjGvK5qBe8JqIJAj5ey'
-    EXPECTED_ADMIN='$2a$12$GpJRXfLZzZW7T9fKZKnkVuW9C6aGXqJT9RqY0P8pVJvWQQIqvLg76'
+    # CORRECT expected hashes for demo123 and admin123 (verified with bcryptjs)
+    EXPECTED_DEMO='$2a$12$FlggC69ExCZaqqaLv.d6gOfWIZJbRdLtfAfNz/dZw0JTohCblKliq'
+    EXPECTED_ADMIN='$2a$12$B3GQNcs5JCDCBKA3zpxBG.r5ESM75LTtdAiqChGlFoUf3g6F8A9zq'
     
     local errors=0
     

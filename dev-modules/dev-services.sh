@@ -207,7 +207,7 @@ service_up() {
             echo -e "${BLUE}Checking lawyer-chat database setup...${NC}"
             
             # Check if User table exists
-            USER_TABLE_EXISTS=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c \
+            USER_TABLE_EXISTS=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d lawyerchat -t -c \
                 "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'User');" 2>/dev/null | tr -d ' ')
             
             if [ "$USER_TABLE_EXISTS" = "f" ] || [ "$USER_TABLE_EXISTS" = "false" ] || [ -z "$USER_TABLE_EXISTS" ]; then
@@ -266,32 +266,34 @@ service_up() {
                 fi
             else
                 # Check if demo users exist
-                USER_COUNT=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c \
+                USER_COUNT=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d lawyerchat -t -c \
                     "SELECT COUNT(*) FROM \"User\" WHERE email IN ('demo@reichmanjorgensen.com', 'admin@reichmanjorgensen.com');" 2>/dev/null | tr -d ' ')
                 
                 if [ "$USER_COUNT" = "0" ] || [ -z "$USER_COUNT" ]; then
                     echo -e "${BLUE}Seeding demo users...${NC}"
                     
-                    if [ -d "services/lawyer-chat" ]; then
-                        cd services/lawyer-chat
-                        # URL-encode the password to handle special characters
-                        ENCODED_PASSWORD=$(url_encode "${DB_PASSWORD}")
-                        export DATABASE_URL="postgresql://${DB_USER:-aletheia}:${ENCODED_PASSWORD}@localhost:${POSTGRES_PORT:-8200}/${DB_NAME:-aletheia}"
-                        
-                        if [ -f "scripts/seed-users.cjs" ]; then
-                            if node scripts/seed-users.cjs &>/dev/null 2>&1; then
-                                echo -e "${GREEN}✓ Demo users created:${NC}"
-                                echo "    • demo@reichmanjorgensen.com / demo123"
-                                echo "    • admin@reichmanjorgensen.com / admin123"
-                            else
-                                echo -e "${YELLOW}⚠ Failed to seed demo users${NC}"
-                            fi
-                        fi
-                        
-                        cd - &>/dev/null
+                    # Seed demo users directly in database with correct bcrypt hashes
+                    # These hashes are for demo123 and admin123 with cost factor 12
+                    DEMO_HASH='$2a$12$/H5nSVmw7n/0MR2ymCXLiOKJcvZVRHcVZYXjGvK5qBe8JqIJAj5ey'
+                    ADMIN_HASH='$2a$12$GpJRXfLZzZW7T9fKZKnkVuW9C6aGXqJT9RqY0P8pVJvWQQIqvLg76'
+                    
+                    if $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d lawyerchat -c \
+                        "INSERT INTO \"User\" (id, email, name, password, role, \"emailVerified\", \"createdAt\", \"updatedAt\") 
+                         VALUES ('demo-user-'||gen_random_uuid(), 'demo@reichmanjorgensen.com', 'Demo User', '${DEMO_HASH}', 'USER', NOW(), NOW(), NOW()),
+                                ('admin-user-'||gen_random_uuid(), 'admin@reichmanjorgensen.com', 'Admin User', '${ADMIN_HASH}', 'ADMIN', NOW(), NOW(), NOW()) 
+                         ON CONFLICT (email) DO UPDATE SET password = EXCLUDED.password, \"updatedAt\" = NOW();" &>/dev/null 2>&1; then
+                        echo -e "${GREEN}✓ Demo users created:${NC}"
+                        echo "    • demo@reichmanjorgensen.com / demo123"
+                        echo "    • admin@reichmanjorgensen.com / admin123"
+                    else
+                        echo -e "${YELLOW}⚠ Failed to seed demo users (may already exist)${NC}"
                     fi
                 else
                     echo -e "${GREEN}✓ Lawyer-chat database ready ($USER_COUNT demo users found)${NC}"
+                    # Verify credentials are working
+                    if command -v verify_credentials &>/dev/null; then
+                        verify_credentials
+                    fi
                 fi
             fi
         else

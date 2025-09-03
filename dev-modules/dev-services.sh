@@ -210,7 +210,7 @@ service_up() {
             USER_TABLE_EXISTS=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c \
                 "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'User');" 2>/dev/null | tr -d ' ')
             
-            if [ "$USER_TABLE_EXISTS" = "f" ] || [ "$USER_TABLE_EXISTS" = "false" ]; then
+            if [ "$USER_TABLE_EXISTS" = "f" ] || [ "$USER_TABLE_EXISTS" = "false" ] || [ -z "$USER_TABLE_EXISTS" ]; then
                 echo -e "${BLUE}Initializing lawyer-chat database...${NC}"
                 
                 # Check if lawyer-chat service directory exists
@@ -221,7 +221,7 @@ service_up() {
                     ENCODED_PASSWORD=$(url_encode "${DB_PASSWORD}")
                     export DATABASE_URL="postgresql://${DB_USER:-aletheia}:${ENCODED_PASSWORD}@localhost:${POSTGRES_PORT:-8200}/${DB_NAME:-aletheia}"
                     
-                    if npx prisma db push --force-reset --skip-generate &>/dev/null 2>&1; then
+                    if npx prisma db push --skip-generate &>/dev/null 2>&1; then
                         echo -e "${GREEN}✓ Database schema created${NC}"
                         
                         # Generate Prisma client
@@ -265,7 +265,7 @@ service_up() {
                 USER_COUNT=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c \
                     "SELECT COUNT(*) FROM \"User\" WHERE email IN ('demo@reichmanjorgensen.com', 'admin@reichmanjorgensen.com');" 2>/dev/null | tr -d ' ')
                 
-                if [ "$USER_COUNT" = "0" ]; then
+                if [ "$USER_COUNT" = "0" ] || [ -z "$USER_COUNT" ]; then
                     echo -e "${BLUE}Seeding demo users...${NC}"
                     
                     if [ -d "services/lawyer-chat" ]; then

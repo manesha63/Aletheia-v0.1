@@ -248,16 +248,6 @@ service_up() {
                             else
                                 echo -e "${YELLOW}⚠ Could not create demo users (may already exist)${NC}"
                             fi
-                            elif [ -f "prisma/seed.ts" ]; then
-                                if npx tsx prisma/seed.ts &>/dev/null 2>&1; then
-                                    echo -e "${GREEN}✓ Demo users created:${NC}"
-                                    echo "    • demo@reichmanjorgensen.com / demo123"
-                                    echo "    • admin@reichmanjorgensen.com / admin123"
-                                else
-                                    echo -e "${YELLOW}⚠ Failed to seed demo users${NC}"
-                                    echo "  You can manually run: cd services/lawyer-chat && npx tsx prisma/seed.ts"
-                                fi
-                            fi
                         else
                             echo -e "${YELLOW}⚠ Failed to generate Prisma client${NC}"
                         fi

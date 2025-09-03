@@ -36,3 +36,8 @@ Thumbs.db
 # Docker
 Dockerfile*
 docker-compose*.yml
+
+# Shell scripts - DO NOT FORMAT
+*.sh
+dev
+dev-modules/*.sh

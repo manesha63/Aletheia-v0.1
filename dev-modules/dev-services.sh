@@ -213,6 +213,10 @@ service_up() {
             if [ "$USER_TABLE_EXISTS" = "f" ] || [ "$USER_TABLE_EXISTS" = "false" ] || [ -z "$USER_TABLE_EXISTS" ]; then
                 echo -e "${BLUE}Initializing lawyer-chat database...${NC}"
                 
+                # Drop any conflicting views that might prevent Prisma from syncing
+                $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -c \
+                    "DROP VIEW IF EXISTS workflow_summary_stats CASCADE;" &>/dev/null
+                
                 # Check if lawyer-chat service directory exists
                 if [ -d "services/lawyer-chat" ]; then
                     cd services/lawyer-chat

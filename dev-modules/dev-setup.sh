@@ -143,7 +143,72 @@ EOF
     else
         echo -e "${GREEN}✓ Generated .env with secure credentials${NC}"
         echo ""
-        
+    fi
+    
+    # Install dependencies for services
+    echo ""
+    echo -e "${BLUE}Installing dependencies...${NC}"
+    
+    # Install lawyer-chat dependencies
+    if [ -d "services/lawyer-chat" ]; then
+        echo -e "${CYAN}Installing lawyer-chat dependencies...${NC}"
+        cd services/lawyer-chat
+        if npm install &>/dev/null; then
+            echo -e "${GREEN}✓ Lawyer-chat dependencies installed${NC}"
+            
+            # Generate Prisma client
+            if npx prisma generate &>/dev/null; then
+                echo -e "${GREEN}✓ Prisma client generated${NC}"
+            else
+                echo -e "${YELLOW}⚠ Failed to generate Prisma client${NC}"
+            fi
+            
+            # Build the service
+            echo -e "${CYAN}Building lawyer-chat...${NC}"
+            if npm run build &>/dev/null; then
+                echo -e "${GREEN}✓ Lawyer-chat built successfully${NC}"
+            else
+                echo -e "${YELLOW}⚠ Failed to build lawyer-chat${NC}"
+            fi
+        else
+            echo -e "${YELLOW}⚠ Failed to install lawyer-chat dependencies${NC}"
+        fi
+        cd - &>/dev/null
+    fi
+    
+    # Install ai-portal dependencies
+    if [ -d "services/ai-portal" ]; then
+        echo -e "${CYAN}Installing ai-portal dependencies...${NC}"
+        cd services/ai-portal
+        if npm install &>/dev/null; then
+            echo -e "${GREEN}✓ AI-portal dependencies installed${NC}"
+            
+            # Build the service
+            echo -e "${CYAN}Building ai-portal...${NC}"
+            if npm run build &>/dev/null; then
+                echo -e "${GREEN}✓ AI-portal built successfully${NC}"
+            else
+                echo -e "${YELLOW}⚠ Failed to build ai-portal${NC}"
+            fi
+        else
+            echo -e "${YELLOW}⚠ Failed to install ai-portal dependencies${NC}"
+        fi
+        cd - &>/dev/null
+    fi
+    
+    # Pre-build essential Docker images (skip slow ones like haystack)
+    echo ""
+    echo -e "${BLUE}Pre-building essential Docker images...${NC}"
+    echo -e "${CYAN}Building n8n and court-processor...${NC}"
+    if $DOCKER_COMPOSE build n8n court-processor 2>/dev/null; then
+        echo -e "${GREEN}✓ Essential Docker images built${NC}"
+    else
+        echo -e "${YELLOW}⚠ Some Docker images failed to build${NC}"
+        echo -e "${YELLOW}  Core services will still work${NC}"
+    fi
+    
+    if [ "$OUTPUT_FORMAT" != "json" ]; then
+        echo ""
         # Notify about court data restoration
         if [ -f court-processor/data/court_documents_backup.sql.gz ]; then
             echo -e "${CYAN}Court processor data backup found (485 documents, ~9.5MB)${NC}"

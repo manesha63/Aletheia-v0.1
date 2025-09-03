@@ -379,10 +379,10 @@ check_ports_internal() {
     return $port_issues
 }
 
-# Environment variable check (replaces audit for env)
-check_env() {
-    # Just call the existing audit command for now
-    # This maintains backward compatibility
+# Environment variable audit (detailed check)
+check_env_audit() {
+    # Call the existing audit command for detailed checks
+    # The basic check_env from dev-lib.sh is used during startup
     handle_audit_command env "$@"
 }
 
@@ -396,4 +396,4 @@ export -f check_docker_internal
 export -f check_config_internal
 export -f check_ports
 export -f check_ports_internal
-export -f check_env
+export -f check_env_audit

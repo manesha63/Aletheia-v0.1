@@ -5,6 +5,87 @@
 # ============================================================================
 # This module contains commands for managing Docker Compose services
 
+# Ensure services are ready (dependencies installed, builds complete)
+ensure_services_ready() {
+    local NEEDS_SETUP=false
+    
+    # Check if lawyer-chat needs setup
+    if [ -d "services/lawyer-chat" ]; then
+        if [ ! -d "services/lawyer-chat/node_modules" ] || [ ! -d "services/lawyer-chat/.next" ]; then
+            NEEDS_SETUP=true
+        fi
+    fi
+    
+    # Check if ai-portal needs setup
+    if [ -d "services/ai-portal" ]; then
+        if [ ! -d "services/ai-portal/node_modules" ] || [ ! -d "services/ai-portal/.next" ]; then
+            NEEDS_SETUP=true
+        fi
+    fi
+    
+    if [ "$NEEDS_SETUP" = true ]; then
+        echo -e "${YELLOW}Services need initial setup...${NC}"
+        echo ""
+        
+        # Install and build lawyer-chat if needed
+        if [ -d "services/lawyer-chat" ]; then
+            if [ ! -d "services/lawyer-chat/node_modules" ]; then
+                echo -e "${CYAN}Installing lawyer-chat dependencies...${NC}"
+                cd services/lawyer-chat
+                if npm install &>/dev/null; then
+                    echo -e "${GREEN}✓ Lawyer-chat dependencies installed${NC}"
+                    
+                    # Generate Prisma client
+                    if npx prisma generate &>/dev/null; then
+                        echo -e "${GREEN}✓ Prisma client generated${NC}"
+                    fi
+                else
+                    echo -e "${YELLOW}⚠ Failed to install lawyer-chat dependencies${NC}"
+                fi
+                cd - &>/dev/null
+            fi
+            
+            if [ ! -d "services/lawyer-chat/.next" ]; then
+                echo -e "${CYAN}Building lawyer-chat...${NC}"
+                cd services/lawyer-chat
+                if npm run build &>/dev/null; then
+                    echo -e "${GREEN}✓ Lawyer-chat built successfully${NC}"
+                else
+                    echo -e "${YELLOW}⚠ Failed to build lawyer-chat${NC}"
+                fi
+                cd - &>/dev/null
+            fi
+        fi
+        
+        # Install and build ai-portal if needed
+        if [ -d "services/ai-portal" ]; then
+            if [ ! -d "services/ai-portal/node_modules" ]; then
+                echo -e "${CYAN}Installing ai-portal dependencies...${NC}"
+                cd services/ai-portal
+                if npm install &>/dev/null; then
+                    echo -e "${GREEN}✓ AI-portal dependencies installed${NC}"
+                else
+                    echo -e "${YELLOW}⚠ Failed to install ai-portal dependencies${NC}"
+                fi
+                cd - &>/dev/null
+            fi
+            
+            if [ ! -d "services/ai-portal/.next" ]; then
+                echo -e "${CYAN}Building ai-portal...${NC}"
+                cd services/ai-portal
+                if npm run build &>/dev/null; then
+                    echo -e "${GREEN}✓ AI-portal built successfully${NC}"
+                else
+                    echo -e "${YELLOW}⚠ Failed to build ai-portal${NC}"
+                fi
+                cd - &>/dev/null
+            fi
+        fi
+        
+        echo ""
+    fi
+}
+
 # Handle service commands
 handle_service_command() {
     local cmd="$1"
@@ -46,6 +127,11 @@ service_up() {
     check_requirements
     check_env
     
+    # Check if services need initial setup (only for full startup)
+    if [ -z "$service" ]; then
+        ensure_services_ready
+    fi
+    
     # Check if specific service requested
     if [ -n "$service" ]; then
         echo -e "${BLUE}Starting $service...${NC}"
@@ -56,8 +142,9 @@ service_up() {
             echo -e "${GREEN}✓ Service $service started${NC}"
         fi
     else
-        echo -e "${BLUE}Starting all Aletheia services...${NC}"
-        $DOCKER_COMPOSE up -d
+        echo -e "${BLUE}Starting essential Aletheia services...${NC}"
+        # Start only essential services, skip slow-building optional ones (haystack, elasticsearch)
+        $DOCKER_COMPOSE up -d db redis n8n web court-processor lawyer-chat ai-portal ai-portal-nginx docker-api
         echo ""
         echo -e "${GREEN}✓ Services started successfully!${NC}"
         echo ""
@@ -591,6 +678,7 @@ service_purge() {
 
 # Export functions
 export -f handle_service_command
+export -f ensure_services_ready
 export -f service_up
 export -f service_down
 export -f service_restart

@@ -205,6 +205,21 @@ check_requirements() {
         exit $EXIT_SERVICE_UNAVAILABLE
     fi
     
+    # Check Node.js and npm
+    if ! command -v node &> /dev/null; then
+        echo -e "${RED}Error: Node.js is not installed${NC}"
+        echo -e "${YELLOW}Please install Node.js (v18 or higher) from: https://nodejs.org/${NC}"
+        REQUIREMENTS_VALID=false
+        exit $EXIT_CONFIG_ERROR
+    fi
+    
+    if ! command -v npm &> /dev/null; then
+        echo -e "${RED}Error: npm is not installed${NC}"
+        echo -e "${YELLOW}npm should come with Node.js. Please reinstall Node.js.${NC}"
+        REQUIREMENTS_VALID=false
+        exit $EXIT_CONFIG_ERROR
+    fi
+    
     # All checks passed
     REQUIREMENTS_VALID=true
     return 0
@@ -213,18 +228,26 @@ check_requirements() {
 # Check if .env exists
 check_env() {
     if [ ! -f .env ]; then
-        if [ -f .env.required ]; then
-            echo -e "${YELLOW}No .env file found. Creating from .env.required...${NC}"
-            cp .env.required .env
-            echo -e "${GREEN}Created .env file. Please edit it with your values.${NC}"
-            echo -e "${YELLOW}Run './dev up' when ready.${NC}"
-            exit $EXIT_CONFIG_ERROR
+        echo -e "${YELLOW}No .env file found. Running setup...${NC}"
+        echo ""
+        
+        # Source the setup module if not already sourced
+        if ! declare -f handle_setup_command &>/dev/null; then
+            source "$SCRIPT_DIR/dev-modules/dev-setup.sh"
+        fi
+        
+        # Run setup with non-interactive flag
+        handle_setup_command --non-interactive
+        
+        # Re-load environment variables after setup
+        if [ -f .env ]; then
+            set -a
+            source .env
+            set +a
+            echo ""
+            echo -e "${GREEN}✓ Environment configured and ready${NC}"
         else
-            echo -e "${RED}No .env file found!${NC}"
-            echo "Please create one with at least these variables:"
-            echo "  DB_PASSWORD=<your_password>"
-            echo "  N8N_ENCRYPTION_KEY=<your_key>"
-            echo "  NEXTAUTH_SECRET=<your_secret>"
+            echo -e "${RED}Failed to create .env file${NC}"
             exit $EXIT_CONFIG_ERROR
         fi
     fi

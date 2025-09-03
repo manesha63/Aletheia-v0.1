@@ -154,9 +154,29 @@ generate_password() {
 }
 
 # URL encode a string (for database passwords with special characters)
+# Pure Bash implementation - no Python dependency
 url_encode() {
-    local string="$1"
-    python3 -c "import urllib.parse; print(urllib.parse.quote('$string'))" 2>/dev/null || echo "$string"
+    local string="${1}"
+    local strlen=${#string}
+    local encoded=""
+    local pos c o
+    
+    for (( pos=0 ; pos<strlen ; pos++ )); do
+        c=${string:$pos:1}
+        case "$c" in
+            [-_.~a-zA-Z0-9] ) 
+                # These characters are safe
+                o="${c}" 
+                ;;
+            * )
+                # All other characters need to be encoded
+                printf -v o '%%%02x' "'${c}"
+                ;;
+        esac
+        encoded+="${o}"
+    done
+    
+    echo "${encoded}"
 }
 
 # Cached requirement check variables (session-level)

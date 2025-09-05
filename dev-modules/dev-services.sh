@@ -182,15 +182,28 @@ service_up() {
                 echo ""
                 echo -e "${BLUE}Checking for court processor data...${NC}"
                 
-                # Check if court_documents table exists and count records
-                COUNT=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c \
-                    "SELECT COUNT(*) FROM public.court_documents" 2>/dev/null || echo "0")
+                # Wait for court_documents table to be created by init script (max 10 seconds)
+                TABLE_EXISTS=false
+                for i in {1..10}; do
+                    if $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -c "\dt court_documents" 2>&1 | grep -q court_documents; then
+                        TABLE_EXISTS=true
+                        break
+                    fi
+                    sleep 1
+                done
+                
+                if [ "$TABLE_EXISTS" = false ]; then
+                    echo -e "${YELLOW}⚠ Court documents table not found (database initialization may still be running)${NC}"
+                else
+                    # Check if court_documents table exists and count records
+                    COUNT=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c \
+                        "SELECT COUNT(*) FROM public.court_documents" 2>/dev/null || echo "0")
                 COUNT=$(echo $COUNT | tr -d ' ')
                 
                 if [ "$COUNT" = "0" ]; then
                     echo -e "${BLUE}Restoring court processor sample data (485 documents)...${NC}"
                     if gunzip -c court-processor/data/court_documents_backup.sql.gz | \
-                       $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" &>/dev/null; then
+                       $DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" >/dev/null 2>&1; then
                         echo -e "${GREEN}✓ Successfully restored 485 court documents${NC}"
                         echo "  Documents are now available in Lawyer Chat interface"
                     else
@@ -200,6 +213,7 @@ service_up() {
                 elif [ "$COUNT" -gt "0" ]; then
                     echo -e "${GREEN}✓ Database already contains $COUNT court documents${NC}"
                 fi
+                fi  # Close TABLE_EXISTS check
             fi
             
             # Auto-initialize lawyer-chat database and seed demo users

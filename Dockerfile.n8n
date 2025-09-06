@@ -2,11 +2,13 @@ FROM n8nio/n8n:1.99.1
 
 USER root
 
-# Install build tools needed for some npm packages
+# Install build tools needed for some npm packages and TypeScript compilation
 RUN apk add --no-cache --virtual .build-deps \
     python3 \
     make \
-    g++
+    g++ \
+    nodejs \
+    npm
 
 # Install runtime tools we need
 RUN apk add --no-cache \
@@ -30,8 +32,13 @@ COPY ./n8n/custom-nodes/n8n-nodes-citation-gen /usr/local/lib/node_modules/n8n-n
 # Remove preinstall script from deepseek that requires pnpm
 RUN sed -i '/"preinstall":/d' /usr/local/lib/node_modules/n8n-nodes-deepseek/package.json
 
-# Install dependencies for each custom node
-RUN cd /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization && npm install --production --no-save && \
+# Install dependencies and build each custom node
+RUN cd /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization && \
+    npm install && \
+    npx tsc nodes/HierarchicalSummarization/HierarchicalSummarization.node.ts --outDir dist --module commonjs --target es2017 --skipLibCheck || true && \
+    mkdir -p dist/nodes/HierarchicalSummarization && \
+    mv dist/HierarchicalSummarization.node.js dist/nodes/HierarchicalSummarization/ 2>/dev/null || true && \
+    echo '"use strict"; Object.defineProperty(exports, "__esModule", { value: true }); exports.nodes = void 0; const HierarchicalSummarization_node_1 = require("./nodes/HierarchicalSummarization/HierarchicalSummarization.node"); exports.nodes = [HierarchicalSummarization_node_1.HierarchicalSummarization];' > dist/index.js && \
     cd /usr/local/lib/node_modules/n8n-nodes-haystack && npm install --production --no-save && \
     cd /usr/local/lib/node_modules/n8n-nodes-citationchecker && npm install --production --no-save && \
     cd /usr/local/lib/node_modules/n8n-nodes-deepseek && npm install --production --no-save && \
@@ -63,7 +70,15 @@ RUN chown -R node:node /data
 # Copy helper scripts while still as root
 COPY ./n8n/scripts/n8n-exec.sh /usr/local/bin/n8n-exec
 COPY ./n8n/scripts/auto-setup.sh /usr/local/bin/auto-setup
-RUN chmod +x /usr/local/bin/n8n-exec /usr/local/bin/auto-setup
+COPY ./n8n/scripts/setup-credentials.sh /usr/local/bin/setup-credentials
+COPY ./n8n/scripts/dev-startup.sh /usr/local/bin/dev-startup
+COPY ./n8n/scripts/import-workflows.sh /usr/local/bin/import-workflows
+RUN chmod +x /usr/local/bin/n8n-exec /usr/local/bin/auto-setup /usr/local/bin/setup-credentials /usr/local/bin/dev-startup /usr/local/bin/import-workflows
+
+# Create workflows directory and copy workflow files
+RUN mkdir -p /workflows
+COPY ./workflow_json/*.json /workflows/
+RUN chown -R node:node /workflows
 
 USER node
 
@@ -71,9 +86,10 @@ ENV N8N_USER_FOLDER=/data
 ENV NODE_PATH=/usr/local/lib/node_modules:/usr/lib/node_modules
 ENV N8N_CUSTOM_EXTENSIONS=/data/.n8n/custom
 
-# Copy the fix script
+# Copy the fix script and entrypoint
 COPY --chown=node:node ./n8n/fix-custom-nodes.sh /fix-custom-nodes.sh
-RUN chmod +x /fix-custom-nodes.sh
+COPY --chown=node:node ./n8n/entrypoint.sh /entrypoint.sh
+RUN chmod +x /fix-custom-nodes.sh /entrypoint.sh
 
-# Use our custom entrypoint that fixes nodes before starting
-ENTRYPOINT ["tini", "--", "/fix-custom-nodes.sh"]
+# Use simplified entrypoint
+ENTRYPOINT ["tini", "--", "/entrypoint.sh"]

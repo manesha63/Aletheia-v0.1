@@ -831,7 +831,15 @@ EOF
                         exit 0
                     fi
                     
-                    # Create credential JSON file
+                    # Get the project ID for the n8n user
+                    PROJECT_ID=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "SELECT projectId FROM project_relation WHERE role='project:personalOwner' LIMIT 1;" 2>/dev/null)
+                    
+                    if [ -z "$PROJECT_ID" ]; then
+                        PROJECT_ID="personal-auto-setup-user"
+                    fi
+                    
+                    # Create credential JSON file with proper password
                     cat > /tmp/n8n_postgres_cred.json <<EOF
 [
   {
@@ -843,7 +851,7 @@ EOF
       "port": 5432,
       "database": "${DB_NAME:-aletheia}",
       "user": "${DB_USER:-aletheia}",
-      "password": "${DB_PASSWORD:-SecurePass123}",
+      "password": "${DB_PASSWORD:-aletheia_secure_pw_2024}",
       "ssl": "disable"
     }
   }
@@ -854,13 +862,19 @@ EOF
                     docker cp /tmp/n8n_postgres_cred.json aletheia_development-n8n-1:/tmp/postgres_cred.json
                     
                     if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported"; then
-                        echo -e "${GREEN}✓${NC} Postgres credential created successfully!"
+                        # Add to shared_credentials table to link with project
+                        docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                            "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                             VALUES ('PMs8mP0nYzWgEu40', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
+                        
+                        echo -e "${GREEN}✓${NC} Postgres credential created and linked to project!"
                         echo ""
                         echo "  ID: PMs8mP0nYzWgEu40"
                         echo "  Name: Postgres Main"
                         echo "  Host: db"
                         echo "  Database: ${DB_NAME:-aletheia}"
                         echo "  User: ${DB_USER:-aletheia}"
+                        echo "  Project: $PROJECT_ID"
                         echo ""
                         echo "The Main workflow can now use this credential."
                         
@@ -893,6 +907,14 @@ EOF
                                     "DELETE FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null
                             fi
                             
+                            # Get the project ID for the n8n user
+                            PROJECT_ID=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                "SELECT projectId FROM project_relation WHERE role='project:personalOwner' LIMIT 1;" 2>/dev/null)
+                            
+                            if [ -z "$PROJECT_ID" ]; then
+                                PROJECT_ID="personal-auto-setup-user"
+                            fi
+                            
                             # Create updated credential
                             cat > /tmp/n8n_postgres_update.json <<EOF
 [
@@ -905,17 +927,24 @@ EOF
       "port": 5432,
       "database": "${DB_NAME:-aletheia}",
       "user": "${DB_USER:-aletheia}",
-      "password": "${DB_PASSWORD:-SecurePass123}",
+      "password": "${DB_PASSWORD:-aletheia_secure_pw_2024}",
       "ssl": "disable"
     }
   }
 ]
 EOF
                             docker cp /tmp/n8n_postgres_update.json aletheia_development-n8n-1:/tmp/postgres_update.json
-                            docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_update.json >/dev/null 2>&1
+                            if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_update.json 2>&1 | grep -q "Successfully imported"; then
+                                # Add to shared_credentials table to link with project
+                                docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                                    "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                                     VALUES ('PMs8mP0nYzWgEu40', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
+                                
+                                echo -e "${GREEN}✓${NC} Postgres credential updated and linked to project"
+                            else
+                                echo -e "${YELLOW}⚠ Failed to update Postgres credential${NC}"
+                            fi
                             rm -f /tmp/n8n_postgres_update.json
-                            
-                            echo -e "${GREEN}✓${NC} Postgres credential updated"
                             echo "  Database: ${DB_NAME:-aletheia}"
                             echo "  User: ${DB_USER:-aletheia}"
                             ;;
@@ -1219,7 +1248,7 @@ EOF
       "port": 5432,
       "database": "${DB_NAME:-aletheia}",
       "user": "${DB_USER:-aletheia}",
-      "password": "${DB_PASSWORD:-SecurePass123}",
+      "password": "${DB_PASSWORD:-aletheia_secure_pw_2024}",
       "ssl": "disable"
     }
   }

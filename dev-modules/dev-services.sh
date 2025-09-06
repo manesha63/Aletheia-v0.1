@@ -313,6 +313,155 @@ service_up() {
             echo "  Database initialization skipped - run './dev up' again when ready"
         fi
     fi
+    
+    # Initialize n8n after services are up
+    if [ -z "$service" ] && [ "$DB_READY" = true ]; then
+        initialize_n8n_setup
+    fi
+}
+
+# Initialize n8n with credentials and workflows
+initialize_n8n_setup() {
+    echo ""
+    echo -e "${BLUE}Initializing n8n automation platform...${NC}"
+    
+    # Wait for n8n to be ready (max 60 seconds)
+    N8N_READY=false
+    for i in {1..60}; do
+        if docker exec aletheia_development-n8n-1 test -f /data/.n8n/database.sqlite 2>/dev/null; then
+            # Check if database has settings table
+            if docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite "SELECT name FROM sqlite_master WHERE type='table' AND name='settings';" 2>/dev/null | grep -q settings; then
+                N8N_READY=true
+                break
+            fi
+        fi
+        if [ $i -eq 1 ]; then
+            echo -n "  Waiting for n8n to initialize"
+        else
+            echo -n "."
+        fi
+        sleep 1
+    done
+    
+    if [ "$N8N_READY" = true ]; then
+        echo ""  # New line after dots
+        
+        # Get the project ID for the n8n user
+        PROJECT_ID=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+            "SELECT projectId FROM project_relation WHERE role='project:personalOwner' LIMIT 1;" 2>/dev/null)
+        
+        if [ -z "$PROJECT_ID" ]; then
+            PROJECT_ID="personal-auto-setup-user"
+        fi
+        
+        # Check if PostgreSQL credential exists
+        POSTGRES_CRED_EXISTS=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+            "SELECT COUNT(*) FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null)
+        
+        if [ "$POSTGRES_CRED_EXISTS" = "0" ] || [ -z "$POSTGRES_CRED_EXISTS" ]; then
+            echo -e "${BLUE}Creating PostgreSQL credential for n8n workflows...${NC}"
+            
+            # Create credential JSON with simplified password
+            cat > /tmp/n8n_postgres_cred.json <<EOF
+[
+  {
+    "id": "PMs8mP0nYzWgEu40",
+    "name": "Postgres Main",
+    "type": "postgres",
+    "data": {
+      "host": "db",
+      "port": 5432,
+      "database": "${DB_NAME:-aletheia}",
+      "user": "${DB_USER:-aletheia}",
+      "password": "${DB_PASSWORD:-aletheia_secure_pw_2024}",
+      "ssl": "disable"
+    }
+  }
+]
+EOF
+            
+            # Copy to container and import
+            docker cp /tmp/n8n_postgres_cred.json aletheia_development-n8n-1:/tmp/postgres_cred.json
+            
+            if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported"; then
+                # Add to shared_credentials table
+                docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                    "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                     VALUES ('PMs8mP0nYzWgEu40', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
+                
+                echo -e "${GREEN}✓ PostgreSQL credential created and linked to project${NC}"
+            else
+                echo -e "${YELLOW}⚠ Failed to import PostgreSQL credential${NC}"
+            fi
+            
+            # Clean up
+            rm -f /tmp/n8n_postgres_cred.json
+            docker exec aletheia_development-n8n-1 rm -f /tmp/postgres_cred.json 2>/dev/null || true
+        else
+            # Ensure credential is linked to project
+            docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                 VALUES ('PMs8mP0nYzWgEu40', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
+            
+            echo -e "${GREEN}✓ PostgreSQL credential already exists${NC}"
+        fi
+        
+        # Check if Anthropic credential exists (if API key is in environment)
+        if [ -n "${ANTHROPIC_API_KEY}" ]; then
+            ANTHROPIC_CRED_EXISTS=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                "SELECT COUNT(*) FROM credentials_entity WHERE id='eT6Unj67DfYj73os';" 2>/dev/null)
+            
+            if [ "$ANTHROPIC_CRED_EXISTS" = "0" ] || [ -z "$ANTHROPIC_CRED_EXISTS" ]; then
+                echo -e "${BLUE}Creating Anthropic API credential...${NC}"
+                
+                # Create Anthropic credential JSON
+                cat > /tmp/n8n_anthropic_cred.json <<EOF
+[
+  {
+    "id": "eT6Unj67DfYj73os",
+    "name": "Anthropic account",
+    "type": "anthropicApi",
+    "data": {
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    }
+  }
+]
+EOF
+                
+                # Copy to container and import
+                docker cp /tmp/n8n_anthropic_cred.json aletheia_development-n8n-1:/tmp/anthropic_cred.json
+                
+                if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_cred.json 2>&1 | grep -q "Successfully imported"; then
+                    # Add to shared_credentials table
+                    docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                         VALUES ('eT6Unj67DfYj73os', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
+                    
+                    echo -e "${GREEN}✓ Anthropic API credential created and linked to project${NC}"
+                else
+                    echo -e "${YELLOW}⚠ Failed to import Anthropic credential${NC}"
+                fi
+                
+                # Clean up
+                rm -f /tmp/n8n_anthropic_cred.json
+                docker exec aletheia_development-n8n-1 rm -f /tmp/anthropic_cred.json 2>/dev/null || true
+            else
+                # Ensure credential is linked to project
+                docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                    "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                     VALUES ('eT6Unj67DfYj73os', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
+                
+                echo -e "${GREEN}✓ Anthropic API credential already exists${NC}"
+            fi
+        fi
+        
+        echo -e "${GREEN}✓ n8n is ready at http://localhost:${N8N_PORT:-8100}${NC}"
+        echo "    Login: velvetmoon222999@gmail.com / admin123"
+    else
+        echo ""  # New line after dots
+        echo -e "${YELLOW}⚠ n8n initialization taking longer than expected${NC}"
+        echo "  You can manually check status with: ./dev n8n status"
+    fi
 }
 
 # Stop services

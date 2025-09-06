@@ -57,7 +57,7 @@ services:
       - N8N_PUBLIC_API_DISABLED=false
       - N8N_PUBLIC_API_SWAGGERUI_DISABLED=false
       # Auto-setup configuration
-      - N8N_SETUP_EMAIL=${N8N_SETUP_EMAIL:-admin@aletheia.local}
+      - N8N_SETUP_EMAIL=${N8N_SETUP_EMAIL:-velvetmoon222999@gmail.com}
       - N8N_SETUP_PASSWORD=${N8N_SETUP_PASSWORD:-admin123}
       - N8N_SETUP_FIRSTNAME=${N8N_SETUP_FIRSTNAME:-Admin}
       - N8N_SETUP_LASTNAME=${N8N_SETUP_LASTNAME:-User}

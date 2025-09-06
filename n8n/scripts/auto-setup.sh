@@ -171,23 +171,18 @@ import_workflows() {
 setup_credentials() {
     echo "Setting up credentials..."
     
-    # Check if credentials already exist
-    local cred_count=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM credentials_entity" 2>/dev/null || echo "0")
-    
-    if [ "$cred_count" -gt "0" ]; then
-        echo "  ✓ Credentials already exist: $cred_count found"
-        return 0
-    fi
-    
-    # Run the credential setup script which uses n8n's import mechanism
-    if [ -f "/usr/local/bin/setup-credentials" ]; then
+    # Run the improved credential setup script
+    if [ -f "/scripts/setup-credentials.sh" ]; then
         echo "  Running credential setup..."
+        /scripts/setup-credentials.sh
+    elif [ -f "/usr/local/bin/setup-credentials" ]; then
+        echo "  Running legacy credential setup..."
         /usr/local/bin/setup-credentials
     else
         echo "  ⚠ Credential setup script not found"
         echo "  ℹ Credentials need to be configured via n8n UI after login"
         echo "    - PostgreSQL: db:5432 with user '${DB_USER:-aletheia}'"
-        echo "    - Anthropic AI: Add API key if available"
+        echo "    - Anthropic AI: Add API key if available (set ANTHROPIC_API_KEY in .env)"
     fi
     
     return 0

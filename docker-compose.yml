@@ -89,10 +89,14 @@ services:
       - NEXT_PUBLIC_WEB_URL=${NEXT_PUBLIC_WEB_URL}
       - NEXT_PUBLIC_AI_PORTAL_URL=${NEXT_PUBLIC_AI_PORTAL_URL}
       - N8N_WEBHOOK_ID=${N8N_WEBHOOK_ID}
+      # API Keys for credential setup (passed through securely)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - n8n_data:/data
       - ./n8n/local-files:/files
       - ./workflow_json:/workflow_json:ro
+      - ./n8n/scripts:/scripts:ro
     networks:
       - backend
       - frontend

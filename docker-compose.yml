@@ -92,6 +92,7 @@ services:
     volumes:
       - n8n_data:/data
       - ./n8n/local-files:/files
+      - ./workflow_json:/workflow_json:ro
     networks:
       - backend
       - frontend

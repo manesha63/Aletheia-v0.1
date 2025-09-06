@@ -247,17 +247,49 @@ main() {
     # Setup credentials
     setup_credentials
     
-    # Skip workflow import - workflows will be created manually
-    echo "Skipping workflow import (workflows directory is empty)"
+    # Import workflows from workflow_json directory
+    echo "Importing workflows..."
+    
+    # Look for workflow files in /workflow_json directory (mapped from host)
+    if [ -d "/workflow_json" ]; then
+        WORKFLOW_COUNT=0
+        for workflow_file in /workflow_json/*.json; do
+            if [ -f "$workflow_file" ]; then
+                WORKFLOW_NAME=$(basename "$workflow_file")
+                echo "  Importing: $WORKFLOW_NAME"
+                
+                # Import using n8n CLI (container should have access to workflow_json)
+                if n8n import:workflow --input="$workflow_file" 2>/dev/null; then
+                    echo "    ✓ Imported successfully"
+                    WORKFLOW_COUNT=$((WORKFLOW_COUNT + 1))
+                else
+                    echo "    ⚠ Import failed or workflow already exists"
+                fi
+            fi
+        done
+        
+        if [ "$WORKFLOW_COUNT" -gt "0" ]; then
+            echo "  ✓ Imported $WORKFLOW_COUNT workflow(s)"
+            
+            # Activate all workflows
+            echo "  Activating workflows..."
+            sqlite3 "$DB_PATH" "UPDATE workflow_entity SET active = 1 WHERE active = 0"
+            echo "  ✓ Workflows activated"
+        else
+            echo "  ℹ No new workflows to import"
+        fi
+    else
+        echo "  ⚠ Workflow directory not found"
+    fi
     
     # Check final workflow count
     echo "Checking workflows..."
     WORKFLOW_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
     
     if [ "$WORKFLOW_COUNT" -gt "0" ]; then
-        echo "  ✓ Found $WORKFLOW_COUNT workflow(s)"
+        echo "  ✓ Total workflows: $WORKFLOW_COUNT"
     else
-        echo "  ℹ No workflows imported (will be created manually)"
+        echo "  ℹ No workflows in database"
     fi
     
     # Final verification

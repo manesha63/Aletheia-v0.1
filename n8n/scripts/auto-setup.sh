@@ -228,8 +228,8 @@ main() {
     # Setup credentials
     setup_credentials
     
-    # Import and activate workflows
-    import_workflows
+    # Skip workflow import - workflows will be created manually
+    echo "Skipping workflow import (workflows directory is empty)"
     
     # Check final workflow count
     echo "Checking workflows..."
@@ -237,15 +237,8 @@ main() {
     
     if [ "$WORKFLOW_COUNT" -gt "0" ]; then
         echo "  ✓ Found $WORKFLOW_COUNT workflow(s)"
-        
-        # Activate all workflows
-        echo "  Activating workflows..."
-        sqlite3 "$DB_PATH" "UPDATE workflow_entity SET active = 1 WHERE active = 0"
-        
-        ACTIVE_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM workflow_entity WHERE active = 1" 2>/dev/null || echo "0")
-        echo "  ✓ $ACTIVE_COUNT workflow(s) are now active"
     else
-        echo "  ⚠ No workflows found after import attempt"
+        echo "  ℹ No workflows imported (will be created manually)"
     fi
     
     # Final verification

@@ -50,6 +50,7 @@ services:
       - NODE_ENV=production
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_AUTH_EXCLUDE_ENDPOINTS=rest,healthz,metrics,webhook,webhook-test
       - N8N_RUNNERS_ENABLED=true
       - N8N_CORS_ENABLED=true
       - N8N_CORS_ALLOW_ORIGIN="${N8N_CORS_ORIGIN:-http://localhost:8080}"

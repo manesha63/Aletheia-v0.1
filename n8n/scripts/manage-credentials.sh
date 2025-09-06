@@ -53,9 +53,9 @@ get_project_id() {
     
     if [ -z "$PROJECT_ID" ]; then
         PROJECT_ID="personal-auto-setup-user"
-        log_warning "Using default project: $PROJECT_ID"
+        log_warning "Using default project: $PROJECT_ID" >&2
     else
-        log_info "Found project: $PROJECT_ID"
+        log_info "Found project: $PROJECT_ID" >&2
     fi
     
     echo "$PROJECT_ID"

@@ -1,30 +1,58 @@
-# Workflow Templates
+# n8n Workflow Templates
 
-This directory contains n8n workflow templates that can be manually imported.
+This directory contains the clean n8n workflow templates for the Aletheia system.
 
-## Why Manual Import?
+## Current Workflows
 
-The workflows have been moved to manual import to avoid issues with:
-- Corrupted workflow JSON files
-- Missing custom node dependencies
-- Automatic activation failures
+### main-workflow-clean.json
+The main workflow that handles webhook requests at path: `c188c31c-1c45-4118-9ece-5b6057ab5177`
 
-## How to Import Workflows
+**Features:**
+- Webhook endpoint for receiving messages
+- Postgres Chat Memory for conversation persistence
+- AI Agent with Anthropic Claude integration
+- Legal document search capabilities (requires Basic Search Workflow)
 
-After starting the services with `./dev up`:
+**Credentials Required:**
+- PostgreSQL database connection
+- Anthropic API key
+
+## Important Notes
+
+1. **Manual Import Only**: Workflows are NOT automatically imported to avoid corruption issues
+2. **Clean State**: All corrupted workflows have been removed
+3. **Single Workflow**: Only the Main Workflow is maintained as the primary interface
+
+## How to Use
 
 1. Access n8n at http://localhost:8100
 2. Login with: velvetmoon222999@gmail.com / admin123
-3. Create a new workflow manually or import from templates
-4. Configure credentials as needed
+3. Import the workflow if needed:
+   ```bash
+   ./dev n8n workflows import workflow_json/main-workflow-clean.json
+   ```
+4. Ensure credentials are configured:
+   - PostgreSQL: Should be auto-configured
+   - Anthropic: Add your API key if not present
 
-## Available Templates
+## Webhook Testing
 
-Currently no templates are provided. Workflows should be created fresh in the n8n UI.
+Test the webhook endpoint:
+```bash
+./dev n8n test webhook
+```
 
-## Creating a Basic Webhook Workflow
+Or manually:
+```bash
+curl -X POST http://localhost:8100/webhook/c188c31c-1c45-4118-9ece-5b6057ab5177 \
+  -H "Content-Type: application/json" \
+  -d '{"sessionKey":"test-session","message":"Hello"}'
+```
 
-1. Add a Webhook node
-2. Set the path to: `c188c31c-1c45-4118-9ece-5b6057ab5177`
-3. Add any additional nodes as needed
-4. Save and activate the workflow
+## Workflow Development
+
+When creating or modifying workflows:
+1. Always export clean versions to this directory
+2. Avoid using custom nodes that may not be available
+3. Test thoroughly before committing
+4. Document any new credential requirements

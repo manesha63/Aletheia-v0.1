@@ -171,8 +171,11 @@ import_workflows() {
 setup_credentials() {
     echo "Setting up credentials..."
     
-    # Run the improved credential setup script
-    if [ -f "/scripts/setup-credentials.sh" ]; then
+    # Use the comprehensive credential management script
+    if [ -f "/scripts/manage-credentials.sh" ]; then
+        echo "  Running comprehensive credential management..."
+        /scripts/manage-credentials.sh
+    elif [ -f "/scripts/setup-credentials.sh" ]; then
         echo "  Running credential setup..."
         /scripts/setup-credentials.sh
     elif [ -f "/usr/local/bin/setup-credentials" ]; then

@@ -206,6 +206,25 @@ main() {
     
     if [ "$IS_SETUP" = "true" ]; then
         echo "n8n already has an owner account"
+        # Clean up any duplicate users without email
+        sqlite3 "$DB_PATH" "DELETE FROM user WHERE email IS NULL OR email = ''"
+        
+        # Ensure the existing user has a project
+        USER_ID="auto-setup-user"
+        PROJECT_ID="personal-$USER_ID"
+        
+        # Check if project exists
+        PROJECT_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM project WHERE id='$PROJECT_ID'" 2>/dev/null || echo "0")
+        if [ "$PROJECT_EXISTS" = "0" ]; then
+            sqlite3 "$DB_PATH" "INSERT INTO project (id, name, type, createdAt, updatedAt) VALUES ('$PROJECT_ID', 'Personal Project', 'personal', datetime('now'), datetime('now'))"
+        fi
+        
+        # Check if project relation exists
+        RELATION_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM project_relation WHERE userId='$USER_ID'" 2>/dev/null || echo "0")
+        if [ "$RELATION_EXISTS" = "0" ]; then
+            sqlite3 "$DB_PATH" "INSERT INTO project_relation (projectId, userId, role, createdAt, updatedAt) VALUES ('$PROJECT_ID', '$USER_ID', 'project:personalOwner', datetime('now'), datetime('now'))"
+            echo "  ✓ Fixed project association for existing user"
+        fi
     else
         echo "Creating owner account..."
         # Create owner with proper password hash for admin123

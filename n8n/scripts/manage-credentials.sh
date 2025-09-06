@@ -69,8 +69,12 @@ test_postgres_connection() {
     local user="$4"
     local password="$5"
     
-    # Create a test SQL that n8n would run
+    # Use n8n's built-in pg module
     cat > /tmp/test_connection.js << EOF
+const path = require('path');
+// Add n8n's node_modules to the path
+require('module').paths.push('/usr/local/lib/node_modules/n8n/node_modules');
+
 const { Client } = require('pg');
 const client = new Client({
     host: '${host}',
@@ -78,13 +82,16 @@ const client = new Client({
     database: '${database}',
     user: '${user}',
     password: '${password}',
-    ssl: false
+    ssl: false,
+    connectionTimeoutMillis: 5000
 });
 
 client.connect()
     .then(() => {
         console.log('SUCCESS');
-        client.end();
+        return client.end();
+    })
+    .then(() => {
         process.exit(0);
     })
     .catch(err => {
@@ -93,11 +100,13 @@ client.connect()
     });
 EOF
     
-    # Try to test with node (n8n has node and pg library)
-    if node /tmp/test_connection.js 2>/dev/null | grep -q "SUCCESS"; then
+    # Try to test with node using n8n's pg library
+    if cd /usr/local/lib/node_modules/n8n && node /tmp/test_connection.js 2>&1 | grep -q "SUCCESS"; then
         rm -f /tmp/test_connection.js
         return 0
     else
+        # Show the actual error for debugging
+        cd /usr/local/lib/node_modules/n8n && node /tmp/test_connection.js 2>&1
         rm -f /tmp/test_connection.js
         return 1
     fi

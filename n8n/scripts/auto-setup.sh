@@ -171,6 +171,12 @@ import_workflows() {
 setup_credentials() {
     echo "Setting up credentials..."
     
+    # First ensure PostgreSQL password is synchronized
+    if [ -f "/scripts/fix-postgres-password.sh" ]; then
+        echo "  Synchronizing PostgreSQL password..."
+        /scripts/fix-postgres-password.sh
+    fi
+    
     # Use the comprehensive credential management script
     if [ -f "/scripts/manage-credentials.sh" ]; then
         echo "  Running comprehensive credential management..."

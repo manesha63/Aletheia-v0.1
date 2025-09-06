@@ -76,9 +76,10 @@ COPY ./n8n/scripts/import-workflows.sh /usr/local/bin/import-workflows
 RUN chmod +x /usr/local/bin/n8n-exec /usr/local/bin/auto-setup /usr/local/bin/setup-credentials /usr/local/bin/dev-startup /usr/local/bin/import-workflows
 
 # Create workflows directory and copy workflow files
-RUN mkdir -p /workflows
-COPY ./workflow_json/*.json /workflows/
-RUN chown -R node:node /workflows
+# Don't bake workflows into image - use mounted volume at runtime
+# RUN mkdir -p /workflows
+# COPY ./workflow_json/*.json /workflows/
+# RUN chown -R node:node /workflows
 
 USER node
 

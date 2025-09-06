@@ -39,8 +39,9 @@ wait_for_db() {
 import_workflows_cli() {
     echo "📦 Importing workflows..."
     
-    # n8n must be running to use import command
-    for workflow_file in /workflows/*.json; do
+    # ONLY import from /workflow_json (mounted from host)
+    # Skip /workflows which has old files baked into image
+    for workflow_file in /workflow_json/*.json; do
         if [ -f "$workflow_file" ]; then
             basename=$(basename "$workflow_file")
             echo "  → Importing: $basename"

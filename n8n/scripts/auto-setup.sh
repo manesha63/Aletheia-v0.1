@@ -251,11 +251,16 @@ main() {
     # Setup credentials
     setup_credentials
     
+    # Skip workflow import - already handled by dev-startup.sh
+    echo "Skipping workflow import (handled by dev-startup)"
+    return 0
+    
+    # DISABLED: Original import logic
     # Import workflows from workflow_json directory
     echo "Importing workflows..."
     
     # Look for workflow files in /workflow_json directory (mapped from host)
-    if [ -d "/workflow_json" ]; then
+    if [ -d "/workflow_json" ] && false; then
         WORKFLOW_COUNT=0
         for workflow_file in /workflow_json/*.json; do
             if [ -f "$workflow_file" ]; then

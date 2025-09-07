@@ -383,7 +383,7 @@ EOF
             # Copy to container and import
             docker cp /tmp/n8n_postgres_cred.json aletheia_development-n8n-1:/tmp/postgres_cred.json
             
-            if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported"; then
+            if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported.*credential"; then
                 # Add to shared_credentials table
                 docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
                     "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
@@ -431,7 +431,7 @@ EOF
                 # Copy to container and import
                 docker cp /tmp/n8n_anthropic_cred.json aletheia_development-n8n-1:/tmp/anthropic_cred.json
                 
-                if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_cred.json 2>&1 | grep -q "Successfully imported"; then
+                if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_cred.json 2>&1 | grep -q "Successfully imported.*credential"; then
                     # Add to shared_credentials table
                     docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
                         "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)

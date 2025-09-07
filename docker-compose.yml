@@ -57,6 +57,9 @@ services:
       # Enable public API access (for dev environment)
       - N8N_PUBLIC_API_DISABLED=false
       - N8N_PUBLIC_API_SWAGGERUI_DISABLED=false
+      # Auth bypass for development
+      - N8N_USER_MANAGEMENT_DISABLED=true
+      - N8N_AUTH_ENABLED=false
       # Auto-setup configuration
       - N8N_SETUP_EMAIL=${N8N_SETUP_EMAIL:-velvetmoon222999@gmail.com}
       - N8N_SETUP_PASSWORD=${N8N_SETUP_PASSWORD:-admin123}

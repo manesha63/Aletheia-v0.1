@@ -37,6 +37,5 @@ echo "  ✓ DeepSeek uses different loading mechanism"
 
 echo "✅ Custom nodes fixed!"
 
-# Don't run background tasks - let entrypoint handle it
-# Start n8n normally
-exec n8n
+# Return control to entrypoint so it can run startup scripts
+# Do NOT start n8n here - let the entrypoint handle it

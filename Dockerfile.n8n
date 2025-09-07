@@ -87,7 +87,7 @@ ENV N8N_USER_FOLDER=/data
 ENV NODE_PATH=/usr/local/lib/node_modules:/usr/lib/node_modules
 ENV N8N_CUSTOM_EXTENSIONS=/data/.n8n/custom
 
-# Copy the fix script and entrypoint
+# Copy the fix script and entrypoint (v2 - fixed to not exec n8n)
 COPY --chown=node:node ./n8n/fix-custom-nodes.sh /fix-custom-nodes.sh
 COPY --chown=node:node ./n8n/entrypoint.sh /entrypoint.sh
 RUN chmod +x /fix-custom-nodes.sh /entrypoint.sh

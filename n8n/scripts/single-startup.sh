@@ -253,6 +253,15 @@ main() {
     import_workflows_once
     setup_credentials_once
     
+    # Always run credential manager if API keys are present
+    # This ensures credentials are properly linked to workflows
+    if [ -n "${ANTHROPIC_API_KEY}" ] || [ -n "${OPENAI_API_KEY}" ]; then
+        log_info "Running credential manager to link API credentials..."
+        if [ -f "/scripts/manage-credentials.sh" ]; then
+            /scripts/manage-credentials.sh
+        fi
+    fi
+    
     # Summary
     local WORKFLOW_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
     local CRED_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM credentials_entity" 2>/dev/null || echo "0")

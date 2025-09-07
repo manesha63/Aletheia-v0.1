@@ -455,6 +455,45 @@ EOF
             fi
         fi
         
+        # Run credential manager to link credentials to workflow nodes
+        if [ -n "${ANTHROPIC_API_KEY}" ] || [ -n "${DB_PASSWORD}" ]; then
+            echo -e "${BLUE}Linking credentials to workflows...${NC}"
+            
+            # Run the credential manager script inside the container
+            if docker exec aletheia_development-n8n-1 sh -c "cd /scripts && ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' ./manage-credentials.sh" &>/dev/null 2>&1; then
+                echo -e "${GREEN}✓ Credentials linked to workflows${NC}"
+                
+                # Restart n8n to reload workflows with updated credentials
+                echo -e "${BLUE}Restarting n8n to apply credential changes...${NC}"
+                docker restart aletheia_development-n8n-1 &>/dev/null
+                
+                # Wait for n8n to be ready again (needs more time after restart)
+                sleep 20
+                
+                # Test webhook if Anthropic key is present
+                if [ -n "${ANTHROPIC_API_KEY}" ]; then
+                    echo -e "${BLUE}Testing n8n webhook...${NC}"
+                    
+                    # Test webhook with a simple request
+                    WEBHOOK_RESPONSE=$(curl -s -X POST \
+                        "http://localhost:${N8N_PORT:-8100}/webhook/${N8N_WEBHOOK_ID:-c188c31c-1c45-4118-9ece-5b6057ab5177}" \
+                        -H "Content-Type: application/json" \
+                        -d '{"sessionKey":"test","message":"Hello"}' \
+                        --max-time 15 2>/dev/null || echo "")
+                    
+                    if [ -n "$WEBHOOK_RESPONSE" ] && [ "$WEBHOOK_RESPONSE" != "{}" ]; then
+                        echo -e "${GREEN}✓ n8n webhook is functional (AI responding)${NC}"
+                    else
+                        echo -e "${YELLOW}⚠ n8n webhook returned empty response${NC}"
+                        echo "  This may mean credentials need manual configuration in n8n UI"
+                    fi
+                fi
+            else
+                echo -e "${YELLOW}⚠ Could not run credential manager${NC}"
+                echo "  You may need to manually configure credentials in n8n UI"
+            fi
+        fi
+        
         echo -e "${GREEN}✓ n8n is ready at http://localhost:${N8N_PORT:-8100}${NC}"
         echo "    Login: velvetmoon222999@gmail.com / admin123"
     else

@@ -262,6 +262,14 @@ main() {
         fi
     fi
     
+    # Run auto-login to create API key and bypass authentication
+    log_info "Setting up authentication bypass..."
+    if [ -f "/scripts/auto-login.sh" ]; then
+        # Run in background after a delay to ensure n8n is fully ready
+        (sleep 5 && /scripts/auto-login.sh) &
+        AUTO_LOGIN_PID=$!
+    fi
+    
     # Summary
     local WORKFLOW_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
     local CRED_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM credentials_entity" 2>/dev/null || echo "0")
@@ -270,6 +278,24 @@ main() {
     log_info "Workflows: $WORKFLOW_COUNT"
     log_info "Credentials: $CRED_COUNT"
     log_info "Login: $SETUP_EMAIL / $SETUP_PASSWORD"
+    
+    # Wait for auto-login to complete (max 30 seconds)
+    if [ -n "$AUTO_LOGIN_PID" ]; then
+        log_info "Waiting for authentication setup..."
+        local wait_count=0
+        while [ $wait_count -lt 30 ]; do
+            if ! kill -0 $AUTO_LOGIN_PID 2>/dev/null; then
+                break
+            fi
+            sleep 1
+            wait_count=$((wait_count + 1))
+        done
+        
+        # Check if API key was created
+        if [ -f "/data/.n8n/.api-key" ]; then
+            log_success "API key ready for webhook access"
+        fi
+    fi
     
     # Stop background n8n
     log_info "Stopping background n8n..."

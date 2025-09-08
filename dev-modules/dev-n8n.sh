@@ -1553,14 +1553,35 @@ EOF
                 webhook_url="http://localhost:${N8N_PORT:-8100}/webhook/${N8N_WEBHOOK_ID}"
                 test_payload="${test_data:-{\"sessionKey\":\"test-session\",\"message\":\"Hello\"}}"
                 
+                # Check if API key exists and use it
+                API_KEY_FILE=""
+                API_KEY=""
+                
+                # Try to find API key file in container
+                if $DOCKER_COMPOSE exec -T n8n test -f /data/.n8n/.api-key 2>/dev/null; then
+                    API_KEY=$($DOCKER_COMPOSE exec -T n8n cat /data/.n8n/.api-key 2>/dev/null)
+                    if [ -n "$API_KEY" ]; then
+                        echo -e "${GREEN}✓${NC} Using API key for authentication"
+                    fi
+                fi
+                
                 echo "Method: HTTP POST"
                 echo "URL: $webhook_url"
                 echo "Payload: $test_payload"
                 echo ""
                 
-                response=$(curl -s -w "\n%{http_code}" -X POST "$webhook_url" \
-                    -H "Content-Type: application/json" \
-                    -d "$test_payload" 2>/dev/null)
+                # Make request with or without API key
+                if [ -n "$API_KEY" ]; then
+                    response=$(curl -s -w "\n%{http_code}" -X POST "$webhook_url" \
+                        -H "Content-Type: application/json" \
+                        -H "X-N8N-API-KEY: $API_KEY" \
+                        -d "$test_payload" 2>/dev/null)
+                else
+                    echo -e "${YELLOW}⚠${NC} No API key found, attempting without authentication..."
+                    response=$(curl -s -w "\n%{http_code}" -X POST "$webhook_url" \
+                        -H "Content-Type: application/json" \
+                        -d "$test_payload" 2>/dev/null)
+                fi
                 
                 http_code=$(echo "$response" | tail -n1)
                 body=$(echo "$response" | sed '$d')
@@ -1585,6 +1606,7 @@ EOF
                     echo "  1. Check if Main workflow is active: ./dev n8n workflows list"
                     echo "  2. Verify webhook ID matches: echo \$N8N_WEBHOOK_ID"
                     echo "  3. Check n8n logs: ./dev n8n logs"
+                    echo "  4. Check if API key was created: ./dev exec n8n cat /data/.n8n/.api-key"
                 fi
                 
             else

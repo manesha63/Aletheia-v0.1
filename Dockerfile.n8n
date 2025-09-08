@@ -14,10 +14,11 @@ RUN apk add --no-cache --virtual .build-deps \
 RUN apk add --no-cache \
     sqlite \
     curl \
-    jq
+    jq \
+    openssl
 
 # Create directories
-RUN mkdir -p /data
+RUN mkdir -p /data /scripts
 
 # Copy custom nodes directly to node_modules with proper names
 COPY ./n8n/custom-nodes/n8n-nodes-hierarchicalSummarization /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization
@@ -73,7 +74,12 @@ COPY ./n8n/scripts/auto-setup.sh /usr/local/bin/auto-setup
 COPY ./n8n/scripts/setup-credentials.sh /usr/local/bin/setup-credentials
 COPY ./n8n/scripts/dev-startup.sh /usr/local/bin/dev-startup
 COPY ./n8n/scripts/import-workflows.sh /usr/local/bin/import-workflows
-RUN chmod +x /usr/local/bin/n8n-exec /usr/local/bin/auto-setup /usr/local/bin/setup-credentials /usr/local/bin/dev-startup /usr/local/bin/import-workflows
+COPY ./n8n/scripts/auto-login.sh /usr/local/bin/auto-login
+RUN chmod +x /usr/local/bin/n8n-exec /usr/local/bin/auto-setup /usr/local/bin/setup-credentials /usr/local/bin/dev-startup /usr/local/bin/import-workflows /usr/local/bin/auto-login
+
+# Also copy scripts to /scripts directory for single-startup.sh
+COPY ./n8n/scripts/*.sh /scripts/
+RUN chmod +x /scripts/*.sh
 
 # Create workflows directory and copy workflow files
 # Don't bake workflows into image - use mounted volume at runtime

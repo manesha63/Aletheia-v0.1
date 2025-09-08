@@ -31,23 +31,31 @@ Before you begin, ensure you have:
 git clone https://github.com/Code4me2/Aletheia-v0.1.git
 cd Aletheia-v0.1
 
-# 2. Setup (first time only)
+# 2. Setup (first time only - creates secure .env file)
 ./dev setup
 
-# 3. Start services
+# 3. Add your AI API key (choose one):
+# For Anthropic Claude:
+sed -i.bak 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=your-api-key-here/' .env && rm .env.bak
+# OR for OpenAI:
+sed -i.bak 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=your-api-key-here/' .env && rm .env.bak
+
+# 4. Start all services
 ./dev up
 
-# 4. Access services
+# 5. Access services
 # Main app:          http://localhost:8080
-# n8n:               http://localhost:8100
+# n8n Workflows:     http://localhost:8100  (no login required!)
 # Lawyer Chat:       http://localhost:8080/chat
 #   Demo login:      demo@reichmanjorgensen.com / demo123
 #   Admin login:     admin@reichmanjorgensen.com / admin123
 # AI Portal:         http://localhost:8102
 # Court Processor:   http://localhost:8104
-# Development API:   http://localhost:8082/status
 
-# Note: Demo users are automatically created on first run
+# Notes: 
+# - Demo users are automatically created on first run
+# - n8n authentication is bypassed automatically (no login needed)
+# - API keys are auto-configured as n8n credentials
 ```
 
 ## Project Overview
@@ -69,28 +77,45 @@ Aletheia is a unified AI-powered platform that combines:
 
 #### Service Management
 ```bash
-./dev up                # Start all services
-./dev down              # Stop all services
-./dev restart           # Restart all services
+./dev up [service]      # Start all services (or specific one)
+./dev down [service]    # Stop all services (or specific one)
+./dev restart [service] # Restart services
 ./dev status            # Check service status
-./dev health            # Check health endpoints
-./dev logs [service]    # View logs
+./dev logs [service]    # View logs (add -f to follow)
+./dev shell [service]   # Access container shell
 ```
 
-#### Development
+#### Development & Troubleshooting
 ```bash
-./dev test              # Run tests
-./dev lint              # Run linting
-./dev build             # Build services
+./dev check             # Full system validation
+./dev rebuild [service] # Rebuild services (add 'hard' for cache clear)
+./dev find-orphans      # Find orphaned containers
+./dev dependencies      # Show service dependency tree
 ```
 
 #### Database
 ```bash
-./dev db backup         # Backup database
-./dev db restore        # Restore database
-./dev db shell          # Database shell
+./dev backup            # Backup database and configs
+./dev db shell          # Open PostgreSQL shell
 ./dev db schema         # View database schema
 ./dev seed-users        # Create/reset demo users for lawyer-chat
+```
+
+#### n8n Workflow Automation
+```bash
+./dev n8n init          # Complete n8n setup wizard
+./dev n8n test webhook  # Test webhook endpoint
+./dev n8n validate      # Health check and validation
+./dev n8n workflows     # Manage workflows
+./dev n8n credentials   # Manage credentials
+```
+
+#### Configuration
+```bash
+./dev env list          # List all environment variables
+./dev env status        # Check environment configuration
+./dev env audit         # Find missing variables (--fix to add)
+./dev env ports         # Show port configuration
 ```
 
 ## Architecture

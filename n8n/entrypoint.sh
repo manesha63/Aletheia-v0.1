@@ -3,6 +3,11 @@
 
 echo "🚀 n8n Starting..."
 
+# Ensure clean state (for tmpfs mount)
+if [ -f /scripts/ensure-clean-state.sh ]; then
+    /scripts/ensure-clean-state.sh
+fi
+
 # Fix custom nodes first
 if [ -f /fix-custom-nodes.sh ]; then
     /fix-custom-nodes.sh

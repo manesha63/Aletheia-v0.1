@@ -11,6 +11,9 @@ fix_node_index() {
     NODE_CLASS="$3"
     
     if [ -d "$NODE_DIR" ]; then
+        # Ensure dist directory exists
+        mkdir -p "$NODE_DIR/dist"
+        
         if [ ! -f "$NODE_DIR/dist/index.js" ]; then
             echo "  ✨ Creating index.js for $NODE_NAME..."
             cat > "$NODE_DIR/dist/index.js" << EOF

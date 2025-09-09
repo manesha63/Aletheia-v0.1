@@ -29,38 +29,101 @@ log_warning() {
     echo -e "${YELLOW}[n8n-startup]${NC} ⚠ $1"
 }
 
-# Wait for database to be ready
-wait_for_database() {
-    log_info "Waiting for database..."
-    local max_wait=60
+log_error() {
+    echo -e "${RED}[n8n-startup]${NC} ✗ $1"
+}
+
+# Execute SQLite command with retry logic for database locks
+sqlite_exec_with_retry() {
+    local query="$1"
+    local max_retries=10
+    local retry_count=0
+    local wait_time=1
+    
+    while [ $retry_count -lt $max_retries ]; do
+        if result=$(sqlite3 "$DB_PATH" "$query" 2>&1); then
+            echo "$result"
+            return 0
+        else
+            if echo "$result" | grep -q "database is locked"; then
+                retry_count=$((retry_count + 1))
+                log_warning "Database locked, retry $retry_count/$max_retries (waiting ${wait_time}s)..."
+                sleep $wait_time
+                wait_time=$((wait_time * 2))  # Exponential backoff
+                if [ $wait_time -gt 10 ]; then
+                    wait_time=10  # Cap at 10 seconds
+                fi
+            else
+                # Not a lock error, fail immediately
+                echo "$result" >&2
+                return 1
+            fi
+        fi
+    done
+    
+    log_error "Failed to execute query after $max_retries retries"
+    return 1
+}
+
+# Wait for database migrations to complete
+wait_for_migrations() {
+    log_info "Waiting for database migrations to complete..."
+    local max_wait=120
     local waited=0
     
+    # First wait for database file
     while [ ! -f "$DB_PATH" ]; do
         if [ $waited -ge $max_wait ]; then
-            log_warning "Database not ready after ${max_wait}s"
+            log_error "Database file not created after ${max_wait}s"
             return 1
         fi
         sleep 2
         waited=$((waited + 2))
     done
     
-    # Wait for tables
-    while ! sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user'" 2>/dev/null | grep -q 1; do
+    # Wait for migrations table to exist
+    while ! sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'" 2>/dev/null | grep -q "migrations"; do
         if [ $waited -ge $max_wait ]; then
-            log_warning "Database tables not ready after ${max_wait}s"
+            log_warning "Migrations table not ready after ${max_wait}s"
             return 1
         fi
         sleep 2
         waited=$((waited + 2))
     done
     
-    log_success "Database ready"
+    # Check if all required tables exist
+    local tables_ready=false
+    while [ "$tables_ready" = false ]; do
+        tables_ready=true
+        
+        for table in "user" "workflow_entity" "credentials_entity" "project" "project_relation"; do
+            if ! sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'" 2>/dev/null | grep -q "$table"; then
+                tables_ready=false
+                break
+            fi
+        done
+        
+        if [ "$tables_ready" = true ]; then
+            log_success "All required tables are ready"
+            break
+        fi
+        
+        if [ $waited -ge $max_wait ]; then
+            log_warning "Some tables not ready after ${max_wait}s, continuing anyway"
+            break
+        fi
+        
+        sleep 2
+        waited=$((waited + 2))
+    done
+    
+    log_success "Database migrations complete (waited ${waited}s)"
     return 0
 }
 
 # Setup owner account (only if needed)
 setup_owner_once() {
-    local IS_SETUP=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='userManagement.isInstanceOwnerSetUp'" 2>/dev/null || echo "")
+    local IS_SETUP=$(sqlite_exec_with_retry "SELECT value FROM settings WHERE key='userManagement.isInstanceOwnerSetUp'" 2>/dev/null || echo "")
     
     if [ "$IS_SETUP" = "true" ]; then
         log_info "Owner account already exists"
@@ -74,7 +137,8 @@ setup_owner_once() {
     # Password hash for 'admin123'
     local PASSWORD_HASH='$2b$10$JtP/WWshmO5wNQ9frbf7Xu1BhRrv8ugRC/RqexJOiGv.Q8zWygHTe'
     
-    sqlite3 "$DB_PATH" << EOF
+    # Use transaction for atomicity
+    sqlite_exec_with_retry "BEGIN TRANSACTION;
 INSERT INTO user (id, email, firstName, lastName, password, role, disabled, settings, createdAt, updatedAt) 
 VALUES ('$USER_ID', '$SETUP_EMAIL', 'Admin', 'User', '$PASSWORD_HASH', 'global:owner', 0, '{}', datetime('now'), datetime('now'));
 
@@ -86,9 +150,14 @@ VALUES ('$PROJECT_ID', '$USER_ID', 'project:personalOwner', datetime('now'), dat
 
 INSERT OR REPLACE INTO settings (key, value, loadOnStartup) 
 VALUES ('userManagement.isInstanceOwnerSetUp', 'true', 1);
-EOF
+COMMIT;"
     
-    log_success "Owner created: $SETUP_EMAIL / $SETUP_PASSWORD"
+    if [ $? -eq 0 ]; then
+        log_success "Owner created: $SETUP_EMAIL / $SETUP_PASSWORD"
+    else
+        log_error "Failed to create owner account"
+        return 1
+    fi
 }
 
 # Import workflows ONLY from workflow_json, ONLY once
@@ -100,7 +169,7 @@ import_workflows_once() {
     fi
     
     # Check if workflows exist
-    local WORKFLOW_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
+    local WORKFLOW_COUNT=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
     
     if [ "$WORKFLOW_COUNT" -gt "0" ]; then
         log_info "Found $WORKFLOW_COUNT existing workflow(s), skipping import"
@@ -133,7 +202,7 @@ import_workflows_once() {
     touch "$IMPORT_MARKER"
     
     # Activate workflows
-    sqlite3 "$DB_PATH" "UPDATE workflow_entity SET active=1 WHERE active=0" 2>/dev/null
+    sqlite_exec_with_retry "UPDATE workflow_entity SET active=1 WHERE active=0"
     log_success "Workflows activated"
 }
 
@@ -142,11 +211,11 @@ setup_credentials_once() {
     log_info "Setting up credentials..."
     
     # Get project ID (without log pollution)
-    local PROJECT_ID=$(sqlite3 "$DB_PATH" "SELECT projectId FROM project_relation WHERE role='project:personalOwner' LIMIT 1" 2>/dev/null || echo "personal-auto-setup-user")
+    local PROJECT_ID=$(sqlite_exec_with_retry "SELECT projectId FROM project_relation WHERE role='project:personalOwner' LIMIT 1" 2>/dev/null || echo "personal-auto-setup-user")
     
     # PostgreSQL credential
     if [ -n "${DB_PASSWORD}" ]; then
-        local POSTGRES_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM credentials_entity WHERE name='Postgres account'" 2>/dev/null || echo "0")
+        local POSTGRES_EXISTS=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM credentials_entity WHERE name='Postgres account'" 2>/dev/null || echo "0")
         
         if [ "$POSTGRES_EXISTS" -eq "0" ]; then
             log_info "Creating PostgreSQL credential..."
@@ -168,11 +237,11 @@ EOF
             
             if n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported"; then
                 # Get the created credential ID and link it
-                local CRED_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM credentials_entity WHERE name='Postgres account' ORDER BY createdAt DESC LIMIT 1" 2>/dev/null)
+                local CRED_ID=$(sqlite_exec_with_retry "SELECT id FROM credentials_entity WHERE name='Postgres account' ORDER BY createdAt DESC LIMIT 1" 2>/dev/null)
                 
                 if [ -n "$CRED_ID" ]; then
-                    sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
-                                        VALUES ('$CRED_ID', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'))" 2>/dev/null
+                    sqlite_exec_with_retry "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                                        VALUES ('$CRED_ID', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'))"
                     log_success "PostgreSQL credential created"
                 fi
             fi
@@ -183,7 +252,7 @@ EOF
     
     # Anthropic credential
     if [ -n "${ANTHROPIC_API_KEY}" ]; then
-        local ANTHROPIC_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM credentials_entity WHERE name='Anthropic account'" 2>/dev/null || echo "0")
+        local ANTHROPIC_EXISTS=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM credentials_entity WHERE name='Anthropic account'" 2>/dev/null || echo "0")
         
         if [ "$ANTHROPIC_EXISTS" -eq "0" ]; then
             log_info "Creating Anthropic credential..."
@@ -200,11 +269,11 @@ EOF
             
             if n8n import:credentials --input=/tmp/anthropic_cred.json 2>&1 | grep -q "Successfully imported"; then
                 # Get the created credential ID and link it
-                local CRED_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM credentials_entity WHERE name='Anthropic account' ORDER BY createdAt DESC LIMIT 1" 2>/dev/null)
+                local CRED_ID=$(sqlite_exec_with_retry "SELECT id FROM credentials_entity WHERE name='Anthropic account' ORDER BY createdAt DESC LIMIT 1" 2>/dev/null)
                 
                 if [ -n "$CRED_ID" ]; then
-                    sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
-                                        VALUES ('$CRED_ID', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'))" 2>/dev/null
+                    sqlite_exec_with_retry "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
+                                        VALUES ('$CRED_ID', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'))"
                     log_success "Anthropic credential created"
                 fi
             fi
@@ -219,10 +288,10 @@ cleanup_duplicates() {
     log_info "Cleaning up duplicate workflows..."
     
     # Remove all workflows except 'central'
-    sqlite3 "$DB_PATH" "DELETE FROM workflow_entity WHERE name != 'central'" 2>/dev/null
+    sqlite_exec_with_retry "DELETE FROM workflow_entity WHERE name != 'central'"
     
     # If no 'central' workflow exists, we'll import it
-    local CENTRAL_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM workflow_entity WHERE name='central'" 2>/dev/null || echo "0")
+    local CENTRAL_COUNT=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity WHERE name='central'" 2>/dev/null || echo "0")
     
     if [ "$CENTRAL_COUNT" -eq "0" ]; then
         log_warning "No 'central' workflow found, will import from workflow_json"
@@ -236,18 +305,31 @@ cleanup_duplicates() {
 main() {
     log_info "=== n8n Single Startup Script ==="
     
-    # Start n8n in background for initialization
-    log_info "Starting n8n in background..."
+    # Ensure custom nodes directory exists
+    if [ ! -d "/data/.n8n/custom" ]; then
+        log_info "Creating custom nodes directory..."
+        mkdir -p /data/.n8n/custom
+    fi
+    
+    # Start n8n in background for database initialization
+    log_info "Starting n8n for database initialization..."
     n8n start &
     N8N_PID=$!
     
-    # Wait for database
-    if ! wait_for_database; then
+    # Wait for migrations to complete
+    if ! wait_for_migrations; then
+        log_error "Failed to wait for migrations"
         kill $N8N_PID 2>/dev/null || true
         exit 1
     fi
     
-    # Run setup steps
+    # Now stop n8n to perform setup without conflicts
+    log_info "Stopping n8n for setup phase..."
+    kill $N8N_PID 2>/dev/null || true
+    wait $N8N_PID 2>/dev/null || true
+    
+    # Run setup steps with database now available and no locks
+    log_info "Running setup steps..."
     setup_owner_once
     cleanup_duplicates
     import_workflows_once
@@ -262,53 +344,22 @@ main() {
         fi
     fi
     
-    # Run auto-login to create API key and bypass authentication
-    log_info "Setting up authentication bypass..."
-    if [ -f "/scripts/auto-login.sh" ]; then
-        # Run in background after a delay to ensure n8n is fully ready
-        (sleep 5 && /scripts/auto-login.sh) &
-        AUTO_LOGIN_PID=$!
-    fi
+    # Note: API key setup is handled by auto-login.sh after n8n starts
+    # since it requires the n8n API to be running
     
     # Summary
-    local WORKFLOW_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
-    local CRED_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM credentials_entity" 2>/dev/null || echo "0")
+    local WORKFLOW_COUNT=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
+    local CRED_COUNT=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM credentials_entity" 2>/dev/null || echo "0")
     
     log_info "=== Startup Complete ==="
     log_info "Workflows: $WORKFLOW_COUNT"
     log_info "Credentials: $CRED_COUNT"
     log_info "Login: $SETUP_EMAIL / $SETUP_PASSWORD"
     
-    # Wait for auto-login to complete (max 30 seconds)
-    if [ -n "$AUTO_LOGIN_PID" ]; then
-        log_info "Waiting for authentication setup..."
-        local wait_count=0
-        while [ $wait_count -lt 30 ]; do
-            if ! kill -0 $AUTO_LOGIN_PID 2>/dev/null; then
-                break
-            fi
-            sleep 1
-            wait_count=$((wait_count + 1))
-        done
-        
-        # Check if API key was created
-        if [ -f "/data/.n8n/.api-key" ]; then
-            log_success "API key ready for webhook access"
-        fi
-    fi
+    # No need to wait or stop n8n - it's already stopped after migrations
     
-    # Stop background n8n
-    log_info "Stopping background n8n..."
-    kill $N8N_PID 2>/dev/null || true
-    wait $N8N_PID 2>/dev/null || true
-    
-    # Copy database to persistent location
-    if [ -f "/home/node/.n8n/database.sqlite" ]; then
-        cp /home/node/.n8n/database.sqlite /data/database.sqlite 2>/dev/null || true
-    fi
-    
-    # Start n8n in foreground
-    log_info "Starting n8n in foreground..."
+    # Start n8n in foreground for production use
+    log_info "Starting n8n in production mode..."
     exec n8n start
 }
 

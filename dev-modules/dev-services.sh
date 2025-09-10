@@ -5,29 +5,52 @@
 # ============================================================================
 # This module contains commands for managing Docker Compose services
 
-# Ensure Docker UID/GID are set in .env (critical for macOS)
+# Ensure Docker UID/GID are set correctly for different use cases
 ensure_docker_uid_gid() {
     if [ -f .env ]; then
-        # Check if DOCKER_UID is missing or set to default 1000 on macOS
-        local current_uid=$(grep "^DOCKER_UID=" .env | cut -d= -f2)
         local actual_uid=$(id -u)
         local actual_gid=$(id -g)
+        local needs_update=false
         
-        # If UID/GID are missing or wrong for the platform, fix them
-        if [ -z "$current_uid" ] || ([[ "$OSTYPE" == "darwin"* ]] && [ "$current_uid" = "1000" ]); then
-            echo -e "${YELLOW}Fixing Docker UID/GID for your platform...${NC}"
+        # Validate that we got numeric UID/GID
+        if ! [[ "$actual_uid" =~ ^[0-9]+$ ]] || ! [[ "$actual_gid" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}✗ Failed to get valid UID/GID from system${NC}"
+            return 1
+        fi
+        
+        # Check if host UID/GID variables are missing or incorrect for the platform
+        local current_host_uid=$(grep "^DOCKER_UID=" .env | cut -d= -f2)
+        if [ -z "$current_host_uid" ] || [ "$current_host_uid" != "$actual_uid" ]; then
+            needs_update=true
+        fi
+        
+        # Check if container UID/GID variables are missing (for tmpfs mounts)
+        local current_n8n_uid=$(grep "^N8N_CONTAINER_UID=" .env | cut -d= -f2)
+        if [ -z "$current_n8n_uid" ]; then
+            needs_update=true
+        fi
+        
+        if [ "$needs_update" = true ]; then
+            echo -e "${YELLOW}Configuring Docker UID/GID for your platform...${NC}"
             
             # Remove old entries if they exist
             sed -i.bak '/^DOCKER_UID=/d' .env 2>/dev/null || sed -i '' '/^DOCKER_UID=/d' .env
             sed -i.bak '/^DOCKER_GID=/d' .env 2>/dev/null || sed -i '' '/^DOCKER_GID=/d' .env
+            sed -i.bak '/^N8N_CONTAINER_UID=/d' .env 2>/dev/null || sed -i '' '/^N8N_CONTAINER_UID=/d' .env
+            sed -i.bak '/^N8N_CONTAINER_GID=/d' .env 2>/dev/null || sed -i '' '/^N8N_CONTAINER_GID=/d' .env
             
             # Append correct values
             echo "" >> .env
-            echo "# Docker UID/GID for tmpfs mounts (auto-corrected)" >> .env
+            echo "# Docker UID/GID configuration (platform-specific)" >> .env
+            echo "# Host UID/GID for file mounts (matches your user)" >> .env
             echo "DOCKER_UID=$actual_uid" >> .env
             echo "DOCKER_GID=$actual_gid" >> .env
+            echo "# Container UID/GID for tmpfs mounts (matches container users)" >> .env
+            echo "N8N_CONTAINER_UID=1000" >> .env
+            echo "N8N_CONTAINER_GID=1000" >> .env
             
-            echo -e "${GREEN}✓ Set DOCKER_UID=$actual_uid, DOCKER_GID=$actual_gid${NC}"
+            echo -e "${GREEN}✓ Host UID/GID: $actual_uid/$actual_gid (for file mounts, matches your user)${NC}"
+            echo -e "${GREEN}✓ Container UID/GID: 1000/1000 (for tmpfs mounts, matches container users)${NC}"
             
             # Clean up backup files
             rm -f .env.bak 2>/dev/null

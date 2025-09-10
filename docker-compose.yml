@@ -116,7 +116,7 @@ services:
       - ./workflow_json:/workflow_json:ro
       - ./n8n/scripts:/scripts:ro
     tmpfs:
-      - /data:uid=${DOCKER_UID:-1000},gid=${DOCKER_GID:-1000}
+      - /data:uid=${N8N_CONTAINER_UID:-1000},gid=${N8N_CONTAINER_GID:-1000}
     networks:
       - backend
       - frontend

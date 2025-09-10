@@ -226,7 +226,26 @@ check_docker_internal() {
                 # Check Docker memory
                 local mem_limit=$(docker info --format '{{.MemTotal}}' 2>/dev/null)
                 if [ -n "$mem_limit" ]; then
-                    echo -e "${GREEN}✓${NC} Docker memory: $mem_limit"
+                    local mem_gb=$((mem_limit / 1073741824))
+                    if [ $mem_gb -lt 4 ]; then
+                        echo -e "${YELLOW}⚠${NC} Docker memory: ${mem_gb}GB (recommended: 4GB minimum)"
+                        echo -e "  ${YELLOW}→ Increase memory in Docker Desktop settings${NC}"
+                        issues=$((issues + 1))
+                    else
+                        echo -e "${GREEN}✓${NC} Docker memory: ${mem_gb}GB"
+                    fi
+                fi
+                
+                # Check Docker CPUs
+                local cpus=$(docker info --format '{{.NCPU}}' 2>/dev/null)
+                if [ -n "$cpus" ]; then
+                    if [ $cpus -lt 2 ]; then
+                        echo -e "${YELLOW}⚠${NC} Docker CPUs: $cpus (recommended: 2 minimum)"
+                        echo -e "  ${YELLOW}→ Increase CPUs in Docker Desktop settings${NC}"
+                        issues=$((issues + 1))
+                    else
+                        echo -e "${GREEN}✓${NC} Docker CPUs: $cpus"
+                    fi
                 fi
             fi
         else

@@ -27,11 +27,22 @@ services:
       POSTGRES_PASSWORD: "${DB_PASSWORD}"  # Use environment variable
       POSTGRES_USER: "${DB_USER}"          # Use environment variable
       POSTGRES_DB: "${DB_NAME}"            # Use environment variable
+      # PostgreSQL memory tuning for limited resources
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 512MB
+      POSTGRES_WORK_MEM: 4MB
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/01-init-databases.sh
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 30s
@@ -95,6 +106,8 @@ services:
       # API Keys for credential setup (passed through securely)
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Node.js memory limit
+      - NODE_OPTIONS=--max-old-space-size=768
     volumes:
       # No persistent data volume - n8n initializes fresh each time
       # This prevents encryption key conflicts and stale state issues
@@ -106,6 +119,13 @@ services:
     networks:
       - backend
       - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
       interval: 30s
@@ -141,6 +161,13 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8104/"]
       interval: 30s
@@ -228,6 +255,13 @@ services:
     networks:
       - backend
       - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/chat"]
       interval: 30s
@@ -280,9 +314,16 @@ services:
       - "${REDIS_PORT}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '1'
+        reservations:
+          memory: 128M
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -317,7 +358,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
       - http.host=0.0.0.0
       - transport.host=127.0.0.1
       - network.host=0.0.0.0
@@ -334,6 +375,13 @@ services:
       retries: 5
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 768M
 
   # Haystack RAG service for document processing
   haystack-service:

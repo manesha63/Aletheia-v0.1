@@ -5,6 +5,36 @@
 # ============================================================================
 # This module contains commands for managing Docker Compose services
 
+# Ensure Docker UID/GID are set in .env (critical for macOS)
+ensure_docker_uid_gid() {
+    if [ -f .env ]; then
+        # Check if DOCKER_UID is missing or set to default 1000 on macOS
+        local current_uid=$(grep "^DOCKER_UID=" .env | cut -d= -f2)
+        local actual_uid=$(id -u)
+        local actual_gid=$(id -g)
+        
+        # If UID/GID are missing or wrong for the platform, fix them
+        if [ -z "$current_uid" ] || ([[ "$OSTYPE" == "darwin"* ]] && [ "$current_uid" = "1000" ]); then
+            echo -e "${YELLOW}Fixing Docker UID/GID for your platform...${NC}"
+            
+            # Remove old entries if they exist
+            sed -i.bak '/^DOCKER_UID=/d' .env 2>/dev/null || sed -i '' '/^DOCKER_UID=/d' .env
+            sed -i.bak '/^DOCKER_GID=/d' .env 2>/dev/null || sed -i '' '/^DOCKER_GID=/d' .env
+            
+            # Append correct values
+            echo "" >> .env
+            echo "# Docker UID/GID for tmpfs mounts (auto-corrected)" >> .env
+            echo "DOCKER_UID=$actual_uid" >> .env
+            echo "DOCKER_GID=$actual_gid" >> .env
+            
+            echo -e "${GREEN}✓ Set DOCKER_UID=$actual_uid, DOCKER_GID=$actual_gid${NC}"
+            
+            # Clean up backup files
+            rm -f .env.bak 2>/dev/null
+        fi
+    fi
+}
+
 # Ensure services are ready (dependencies installed, builds complete)
 ensure_services_ready() {
     local NEEDS_SETUP=false
@@ -126,6 +156,9 @@ service_up() {
     
     check_requirements
     check_env
+    
+    # Ensure Docker UID/GID are correct (critical for macOS)
+    ensure_docker_uid_gid
     
     # Check if services need initial setup (only for full startup)
     if [ -z "$service" ]; then

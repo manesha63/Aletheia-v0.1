@@ -201,6 +201,42 @@ get_service_dependencies() {
 # Cleanup Operations
 # ============================================================================
 
+# Clean up orphaned containers from previous sessions
+cleanup_orphaned_containers() {
+    if ! command -v docker &>/dev/null || ! docker ps &>/dev/null 2>&1; then
+        return 0  # Docker not available, skip
+    fi
+    
+    local compose_containers
+    local all_project_containers
+    
+    # Get containers that docker-compose knows about
+    compose_containers=$($DOCKER_COMPOSE ps -q 2>/dev/null || true)
+    
+    # Get all containers with our project label
+    all_project_containers=$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT_NAME}" 2>/dev/null || true)
+    
+    if [ -z "$all_project_containers" ]; then
+        return 0  # No containers to check
+    fi
+    
+    local orphaned_count=0
+    for container in $all_project_containers; do
+        if [ -z "$compose_containers" ] || ! echo "$compose_containers" | grep -q "$container"; then
+            local container_name=$(docker inspect --format='{{.Name}}' "$container" 2>/dev/null | sed 's/^\/*//')
+            if [ -n "$container_name" ]; then
+                echo -e "${YELLOW}Removing orphaned container: $container_name${NC}"
+                docker rm -f "$container" &>/dev/null
+                orphaned_count=$((orphaned_count + 1))
+            fi
+        fi
+    done
+    
+    if [ $orphaned_count -gt 0 ]; then
+        echo -e "${GREEN}✓ Cleaned up $orphaned_count orphaned container(s)${NC}"
+    fi
+}
+
 # Clean up session caches
 cleanup_docker_caches() {
     # Caches are now in ALETHEIA_TEMP which is cleaned up by dev-lib.sh
@@ -209,6 +245,9 @@ cleanup_docker_caches() {
 }
 
 # Note: Cleanup is handled by dev-lib.sh cleanup_session()
+
+# Run cleanup on module load
+cleanup_orphaned_containers
 
 # ============================================================================
 # Export Functions
@@ -226,3 +265,4 @@ export -f check_required_services
 export -f parse_compose_config
 export -f get_service_dependencies
 export -f cleanup_docker_caches
+export -f cleanup_orphaned_containers

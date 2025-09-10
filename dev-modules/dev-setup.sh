@@ -103,6 +103,11 @@ N8N_ENCRYPTION_KEY=$(generate_password 32)
 NEXTAUTH_SECRET=$(generate_password 64)
 N8N_WEBHOOK_ID=c188c31c-1c45-4118-9ece-5b6057ab5177
 
+# Docker UID/GID for tmpfs mounts (platform-specific)
+# On macOS, users typically have UID 501+, on Linux it's usually 1000
+DOCKER_UID=$(id -u)
+DOCKER_GID=$(id -g)
+
 # Optional - N8N API Credentials (leave empty if not using API)
 N8N_API_KEY=
 N8N_API_SECRET=

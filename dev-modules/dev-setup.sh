@@ -201,6 +201,33 @@ EOF
         cd - &>/dev/null
     fi
     
+    # Initialize volume permissions
+    echo ""
+    echo -e "${BLUE}Initializing volume permissions...${NC}"
+    
+    # Create required directories with appropriate permissions
+    mkdir -p court-data/pdfs court-data/logs 2>/dev/null
+    mkdir -p n8n/local-files 2>/dev/null
+    mkdir -p services/lawyer-chat/.next 2>/dev/null
+    
+    # Set permissions based on platform
+    if [[ "$OSTYPE" == "darwin"* ]] || [ -n "${DOCKER_DESKTOP}" ]; then
+        # macOS/Docker Desktop: More permissive for compatibility
+        echo -e "${CYAN}Setting permissive permissions for Docker Desktop...${NC}"
+        chmod -R 775 court-data n8n/local-files 2>/dev/null || true
+    else
+        # Linux: Standard permissions
+        echo -e "${CYAN}Setting standard permissions...${NC}"
+        # Try to match container user (usually 1000)
+        if [ "$(id -u)" = "1000" ]; then
+            chmod -R 755 court-data n8n/local-files 2>/dev/null || true
+        else
+            # Different UID - be more permissive
+            chmod -R 775 court-data n8n/local-files 2>/dev/null || true
+        fi
+    fi
+    echo -e "${GREEN}✓ Volume permissions initialized${NC}"
+    
     # Pre-build essential Docker images (skip slow ones like haystack)
     echo ""
     echo -e "${BLUE}Pre-building essential Docker images...${NC}"

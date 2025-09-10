@@ -332,12 +332,94 @@ export -f print_header
 export -f confirm_operation
 
 # ============================================================================
+# Secure Temp Directory Management
+# ============================================================================
+
+# Global temp directory for this session
+export ALETHEIA_TEMP=""
+
+# Create secure temp directory for the session
+create_secure_temp_dir() {
+    # Use platform-appropriate temp location
+    local base_temp
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS: Use user's temp directory
+        base_temp="${TMPDIR:-/tmp}"
+    else
+        # Linux: Use XDG runtime dir if available (more secure)
+        base_temp="${XDG_RUNTIME_DIR:-/tmp}"
+    fi
+    
+    # Create unique directory with restricted permissions
+    ALETHEIA_TEMP="${base_temp}/aletheia_$$_$(date +%s)"
+    
+    # Create with restricted permissions (owner only)
+    if ! mkdir -m 700 -p "$ALETHEIA_TEMP" 2>/dev/null; then
+        echo -e "${RED}Error: Cannot create secure temp directory${NC}"
+        echo "  Attempted: $ALETHEIA_TEMP"
+        echo "  Check permissions on: $base_temp"
+        exit 1
+    fi
+    
+    # Verify permissions are correct
+    if [[ "$OSTYPE" != "darwin"* ]]; then
+        # On Linux, verify permissions (macOS stat has different syntax)
+        local perms=$(stat -c %a "$ALETHEIA_TEMP" 2>/dev/null)
+        if [ "$perms" != "700" ]; then
+            chmod 700 "$ALETHEIA_TEMP"
+        fi
+    fi
+    
+    export ALETHEIA_TEMP
+    return 0
+}
+
+# Clean up stale temp files from previous sessions
+cleanup_stale_temps() {
+    local base_temp
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        base_temp="${TMPDIR:-/tmp}"
+    else
+        base_temp="${XDG_RUNTIME_DIR:-/tmp}"
+    fi
+    
+    # Remove old Aletheia temp directories (older than 1 day)
+    find "$base_temp" -maxdepth 1 -type d -name "aletheia_*" -mtime +1 -exec rm -rf {} \; 2>/dev/null
+    
+    # Clean up any credential files immediately (SECURITY!)
+    find "$base_temp" -maxdepth 1 -type f \( \
+        -name "n8n_*_cred.json" -o \
+        -name "*_postgres_*.json" -o \
+        -name "*_anthropic_*.json" -o \
+        -name "aletheia_*.json" \
+    \) -exec rm -f {} \; 2>/dev/null
+    
+    # Remove temp files from dead processes
+    for file in "$base_temp"/aletheia_*_[0-9]* "$base_temp"/*_map_[0-9]*; do
+        if [ -f "$file" ]; then
+            # Extract PID from filename
+            local pid="${file##*_}"
+            pid="${pid%%.*}"  # Remove any extension
+            # Check if process is dead
+            if ! kill -0 "$pid" 2>/dev/null; then
+                rm -f "$file" 2>/dev/null
+            fi
+        fi
+    done
+}
+
+# ============================================================================
 # Session Cleanup
 # ============================================================================
 
 # Clean up all session temporary files
 cleanup_session() {
-    # Clean up any temporary files created during session
+    # Clean up secure temp directory if it exists
+    if [ -n "$ALETHEIA_TEMP" ] && [ -d "$ALETHEIA_TEMP" ]; then
+        rm -rf "$ALETHEIA_TEMP" 2>/dev/null
+    fi
+    
+    # Clean up any legacy files (backwards compatibility)
     rm -f /tmp/aletheia_*_$$ 2>/dev/null
     rm -f /tmp/service_container_map_$$ 2>/dev/null
     
@@ -347,7 +429,13 @@ cleanup_session() {
     fi
 }
 
+# Initialize on startup
+cleanup_stale_temps
+create_secure_temp_dir
+
 # Register cleanup on exit
 trap cleanup_session EXIT INT TERM
 
 export -f cleanup_session
+export -f create_secure_temp_dir
+export -f cleanup_stale_temps

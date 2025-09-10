@@ -63,11 +63,10 @@ show_all_deps() {
     local services=$(get_all_services | sort)
     
     # Use temp files for dependency maps (macOS bash doesn't support associative arrays)
-    local deps_file="/tmp/deps_map_$$"
-    local rdeps_file="/tmp/rdeps_map_$$"
+    local deps_file="${ALETHEIA_TEMP}/deps_map"
+    local rdeps_file="${ALETHEIA_TEMP}/rdeps_map"
     
-    # Clean up temp files on exit
-    trap "rm -f $deps_file $rdeps_file" EXIT
+    # Note: Cleanup handled by dev-lib.sh cleanup_session()
     
     # Build dependency map
     for service in $services; do
@@ -311,10 +310,9 @@ show_dependency_levels() {
     echo -e "${CYAN}Recommended startup order:${NC}"
     
     local services=$(get_all_services)
-    local deps_file="/tmp/deps_levels_$$"
+    local deps_file="${ALETHEIA_TEMP}/deps_levels"
     
-    # Clean up temp file on exit
-    trap "rm -f $deps_file" EXIT
+    # Note: Cleanup handled by dev-lib.sh cleanup_session()
     
     # Build dependency map
     for service in $services; do

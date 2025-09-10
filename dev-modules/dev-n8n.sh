@@ -840,7 +840,7 @@ EOF
                     fi
                     
                     # Create credential JSON file with proper password
-                    cat > /tmp/n8n_postgres_cred.json <<EOF
+                    cat > "${ALETHEIA_TEMP}/n8n_postgres_cred.json" <<EOF
 [
   {
     "id": "PMs8mP0nYzWgEu40",
@@ -859,7 +859,7 @@ EOF
 EOF
                     
                     # Copy to container and import
-                    docker cp /tmp/n8n_postgres_cred.json aletheia_development-n8n-1:/tmp/postgres_cred.json
+                    docker cp "${ALETHEIA_TEMP}/n8n_postgres_cred.json" aletheia_development-n8n-1:/tmp/postgres_cred.json
                     
                     if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported"; then
                         # Add to shared_credentials table to link with project
@@ -879,12 +879,12 @@ EOF
                         echo "The Main workflow can now use this credential."
                         
                         # Clean up
-                        rm -f /tmp/n8n_postgres_cred.json
+                        rm -f "${ALETHEIA_TEMP}/n8n_postgres_cred.json"
                         docker exec aletheia_development-n8n-1 rm -f /tmp/postgres_cred.json 2>/dev/null || true
                     else
                         echo -e "${RED}Failed to create credential${NC}"
                         echo "Please create it manually in the n8n UI."
-                        rm -f /tmp/n8n_postgres_cred.json
+                        rm -f "${ALETHEIA_TEMP}/n8n_postgres_cred.json"
                         exit 1
                     fi
                     ;;
@@ -916,7 +916,7 @@ EOF
                             fi
                             
                             # Create updated credential
-                            cat > /tmp/n8n_postgres_update.json <<EOF
+                            cat > "${ALETHEIA_TEMP}/n8n_postgres_update.json" <<EOF
 [
   {
     "id": "PMs8mP0nYzWgEu40",
@@ -933,7 +933,7 @@ EOF
   }
 ]
 EOF
-                            docker cp /tmp/n8n_postgres_update.json aletheia_development-n8n-1:/tmp/postgres_update.json
+                            docker cp "${ALETHEIA_TEMP}/n8n_postgres_update.json" aletheia_development-n8n-1:/tmp/postgres_update.json
                             if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_update.json 2>&1 | grep -q "Successfully imported"; then
                                 # Add to shared_credentials table to link with project
                                 docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
@@ -944,7 +944,7 @@ EOF
                             else
                                 echo -e "${YELLOW}⚠ Failed to update Postgres credential${NC}"
                             fi
-                            rm -f /tmp/n8n_postgres_update.json
+                            rm -f "${ALETHEIA_TEMP}/n8n_postgres_update.json"
                             echo "  Database: ${DB_NAME:-aletheia}"
                             echo "  User: ${DB_USER:-aletheia}"
                             ;;
@@ -979,7 +979,7 @@ EOF
                             fi
                             
                             # Create updated credential
-                            cat > /tmp/n8n_anthropic_update.json <<EOF
+                            cat > "${ALETHEIA_TEMP}/n8n_anthropic_update.json" <<EOF
 [
   {
     "id": "$existing_id",
@@ -991,9 +991,9 @@ EOF
   }
 ]
 EOF
-                            docker cp /tmp/n8n_anthropic_update.json aletheia_development-n8n-1:/tmp/anthropic_update.json
+                            docker cp "${ALETHEIA_TEMP}/n8n_anthropic_update.json" aletheia_development-n8n-1:/tmp/anthropic_update.json
                             docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_update.json >/dev/null 2>&1
-                            rm -f /tmp/n8n_anthropic_update.json
+                            rm -f "${ALETHEIA_TEMP}/n8n_anthropic_update.json"
                             
                             echo -e "${GREEN}✓${NC} Anthropic credential updated"
                             ;;
@@ -1237,7 +1237,7 @@ EOF
             if [ -z "$postgres_check" ]; then
                 echo "Creating Postgres credential..."
                 # Create the credential
-                cat > /tmp/n8n_postgres_init.json <<EOF
+                cat > "${ALETHEIA_TEMP}/n8n_postgres_init.json" <<EOF
 [
   {
     "id": "PMs8mP0nYzWgEu40",
@@ -1254,9 +1254,9 @@ EOF
   }
 ]
 EOF
-                docker cp /tmp/n8n_postgres_init.json aletheia_development-n8n-1:/tmp/postgres_init.json
+                docker cp "${ALETHEIA_TEMP}/n8n_postgres_init.json" aletheia_development-n8n-1:/tmp/postgres_init.json
                 docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_init.json >/dev/null 2>&1
-                rm -f /tmp/n8n_postgres_init.json
+                rm -f "${ALETHEIA_TEMP}/n8n_postgres_init.json"
                 echo -e "${GREEN}✓${NC} Postgres credential created"
             else
                 echo -e "${GREEN}✓${NC} Postgres credential already exists"
@@ -1271,7 +1271,7 @@ EOF
             if [ -z "$anthropic_check" ]; then
                 if [ -n "$ANTHROPIC_API_KEY" ]; then
                     echo "Creating Anthropic credential from environment..."
-                    cat > /tmp/n8n_anthropic_init.json <<EOF
+                    cat > "${ALETHEIA_TEMP}/n8n_anthropic_init.json" <<EOF
 [
   {
     "id": "PAB7ZSRzpUCaL5VR",
@@ -1283,9 +1283,9 @@ EOF
   }
 ]
 EOF
-                    docker cp /tmp/n8n_anthropic_init.json aletheia_development-n8n-1:/tmp/anthropic_init.json
+                    docker cp "${ALETHEIA_TEMP}/n8n_anthropic_init.json" aletheia_development-n8n-1:/tmp/anthropic_init.json
                     docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_init.json >/dev/null 2>&1
-                    rm -f /tmp/n8n_anthropic_init.json
+                    rm -f "${ALETHEIA_TEMP}/n8n_anthropic_init.json"
                     echo -e "${GREEN}✓${NC} Anthropic credential created"
                 else
                     echo -e "${YELLOW}⚠${NC} No ANTHROPIC_API_KEY in environment"
@@ -1651,10 +1651,10 @@ EOF
                 
                 if [ -n "$test_data" ]; then
                     # With test data - need to create a temporary file
-                    echo "$test_data" > /tmp/n8n_test_data.json
-                    docker cp /tmp/n8n_test_data.json aletheia_development-n8n-1:/tmp/test_data.json
+                    echo "$test_data" > "${ALETHEIA_TEMP}/n8n_test_data.json"
+                    docker cp "${ALETHEIA_TEMP}/n8n_test_data.json" aletheia_development-n8n-1:/tmp/test_data.json
                     result=$(docker exec aletheia_development-n8n-1 n8n execute --id="$workflow_id" --input=/tmp/test_data.json 2>&1)
-                    rm -f /tmp/n8n_test_data.json
+                    rm -f "${ALETHEIA_TEMP}/n8n_test_data.json"
                 else
                     result=$(docker exec aletheia_development-n8n-1 n8n execute --id="$workflow_id" 2>&1)
                 fi

@@ -161,7 +161,7 @@ check_required_services() {
 # Parse docker-compose.yml efficiently (cached)
 parse_compose_config() {
     local query="$1"
-    local cache_file="/tmp/aletheia_compose_cache_$$"
+    local cache_file="${ALETHEIA_TEMP}/compose_cache"
     
     # Cache the full config if not already cached
     if [ ! -f "$cache_file" ]; then
@@ -203,13 +203,12 @@ get_service_dependencies() {
 
 # Clean up session caches
 cleanup_docker_caches() {
-    rm -f /tmp/aletheia_compose_cache_$$ 2>/dev/null
-    rm -f /tmp/aletheia_services_cache_$$ 2>/dev/null
-    rm -f /tmp/service_container_map_$$ 2>/dev/null
+    # Caches are now in ALETHEIA_TEMP which is cleaned up by dev-lib.sh
+    # This function is kept for backwards compatibility
+    return 0
 }
 
-# Register cleanup on exit
-trap cleanup_docker_caches EXIT
+# Note: Cleanup is handled by dev-lib.sh cleanup_session()
 
 # ============================================================================
 # Export Functions

@@ -362,7 +362,7 @@ initialize_n8n_setup() {
             echo -e "${BLUE}Creating PostgreSQL credential for n8n workflows...${NC}"
             
             # Create credential JSON with simplified password
-            cat > /tmp/n8n_postgres_cred.json <<EOF
+            cat > "${ALETHEIA_TEMP}/n8n_postgres_cred.json" <<EOF
 [
   {
     "id": "PMs8mP0nYzWgEu40",
@@ -381,7 +381,7 @@ initialize_n8n_setup() {
 EOF
             
             # Copy to container and import
-            docker cp /tmp/n8n_postgres_cred.json aletheia_development-n8n-1:/tmp/postgres_cred.json
+            docker cp "${ALETHEIA_TEMP}/n8n_postgres_cred.json" aletheia_development-n8n-1:/tmp/postgres_cred.json
             
             if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported.*credential"; then
                 # Add to shared_credentials table
@@ -395,7 +395,7 @@ EOF
             fi
             
             # Clean up
-            rm -f /tmp/n8n_postgres_cred.json
+            rm -f "${ALETHEIA_TEMP}/n8n_postgres_cred.json"
             docker exec aletheia_development-n8n-1 rm -f /tmp/postgres_cred.json 2>/dev/null || true
         else
             # Ensure credential is linked to project
@@ -415,7 +415,7 @@ EOF
                 echo -e "${BLUE}Creating Anthropic API credential...${NC}"
                 
                 # Create Anthropic credential JSON
-                cat > /tmp/n8n_anthropic_cred.json <<EOF
+                cat > "${ALETHEIA_TEMP}/n8n_anthropic_cred.json" <<EOF
 [
   {
     "id": "eT6Unj67DfYj73os",
@@ -429,7 +429,7 @@ EOF
 EOF
                 
                 # Copy to container and import
-                docker cp /tmp/n8n_anthropic_cred.json aletheia_development-n8n-1:/tmp/anthropic_cred.json
+                docker cp "${ALETHEIA_TEMP}/n8n_anthropic_cred.json" aletheia_development-n8n-1:/tmp/anthropic_cred.json
                 
                 if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_cred.json 2>&1 | grep -q "Successfully imported.*credential"; then
                     # Add to shared_credentials table
@@ -443,7 +443,7 @@ EOF
                 fi
                 
                 # Clean up
-                rm -f /tmp/n8n_anthropic_cred.json
+                rm -f "${ALETHEIA_TEMP}/n8n_anthropic_cred.json"
                 docker exec aletheia_development-n8n-1 rm -f /tmp/anthropic_cred.json 2>/dev/null || true
             else
                 # Ensure credential is linked to project

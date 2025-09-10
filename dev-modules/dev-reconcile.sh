@@ -47,7 +47,7 @@ reconcile_status() {
     local compose_count=$(echo "$compose_services" | wc -l)
     
     # Build service to container name mapping using shared function
-    local service_container_map="/tmp/service_container_map_$$"
+    local service_container_map="${ALETHEIA_TEMP}/service_container_map"
     > "$service_container_map"
     
     for service in $compose_services; do

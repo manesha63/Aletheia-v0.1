@@ -247,7 +247,7 @@ cleanup_docker_caches() {
 # Note: Cleanup is handled by dev-lib.sh cleanup_session()
 
 # Run cleanup on module load
-cleanup_orphaned_containers
+# cleanup_orphaned_containers  # Disabled: causes issues with running containers during startup
 
 # ============================================================================
 # Export Functions

@@ -410,114 +410,14 @@ initialize_n8n_setup() {
             PROJECT_ID="personal-auto-setup-user"
         fi
         
-        # Check if PostgreSQL credential exists
-        POSTGRES_CRED_EXISTS=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
-            "SELECT COUNT(*) FROM credentials_entity WHERE id='PMs8mP0nYzWgEu40';" 2>/dev/null)
+        # Configure n8n credentials using the reliable credential management system
+        echo -e "${BLUE}Configuring n8n credentials...${NC}"
         
-        if [ "$POSTGRES_CRED_EXISTS" = "0" ] || [ -z "$POSTGRES_CRED_EXISTS" ]; then
-            echo -e "${BLUE}Creating PostgreSQL credential for n8n workflows...${NC}"
-            
-            # Create credential JSON with simplified password
-            cat > "${ALETHEIA_TEMP}/n8n_postgres_cred.json" <<EOF
-[
-  {
-    "id": "PMs8mP0nYzWgEu40",
-    "name": "Postgres Main",
-    "type": "postgres",
-    "data": {
-      "host": "db",
-      "port": 5432,
-      "database": "${DB_NAME:-aletheia}",
-      "user": "${DB_USER:-aletheia}",
-      "password": "${DB_PASSWORD:-aletheia_secure_pw_2024}",
-      "ssl": "disable"
-    }
-  }
-]
-EOF
-            
-            # Copy to container and import
-            docker cp "${ALETHEIA_TEMP}/n8n_postgres_cred.json" aletheia_development-n8n-1:/tmp/postgres_cred.json
-            
-            if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/postgres_cred.json 2>&1 | grep -q "Successfully imported.*credential"; then
-                # Add to shared_credentials table
-                docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
-                    "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
-                     VALUES ('PMs8mP0nYzWgEu40', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
-                
-                echo -e "${GREEN}✓ PostgreSQL credential created and linked to project${NC}"
-            else
-                echo -e "${YELLOW}⚠ Failed to import PostgreSQL credential${NC}"
-            fi
-            
-            # Clean up
-            rm -f "${ALETHEIA_TEMP}/n8n_postgres_cred.json"
-            docker exec aletheia_development-n8n-1 rm -f /tmp/postgres_cred.json 2>/dev/null || true
-        else
-            # Ensure credential is linked to project
-            docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
-                "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
-                 VALUES ('PMs8mP0nYzWgEu40', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
-            
-            echo -e "${GREEN}✓ PostgreSQL credential already exists${NC}"
-        fi
-        
-        # Check if Anthropic credential exists (if API key is in environment)
-        if [ -n "${ANTHROPIC_API_KEY}" ]; then
-            ANTHROPIC_CRED_EXISTS=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
-                "SELECT COUNT(*) FROM credentials_entity WHERE id='eT6Unj67DfYj73os';" 2>/dev/null)
-            
-            if [ "$ANTHROPIC_CRED_EXISTS" = "0" ] || [ -z "$ANTHROPIC_CRED_EXISTS" ]; then
-                echo -e "${BLUE}Creating Anthropic API credential...${NC}"
-                
-                # Create Anthropic credential JSON
-                cat > "${ALETHEIA_TEMP}/n8n_anthropic_cred.json" <<EOF
-[
-  {
-    "id": "eT6Unj67DfYj73os",
-    "name": "Anthropic account",
-    "type": "anthropicApi",
-    "data": {
-      "apiKey": "${ANTHROPIC_API_KEY}"
-    }
-  }
-]
-EOF
-                
-                # Copy to container and import
-                docker cp "${ALETHEIA_TEMP}/n8n_anthropic_cred.json" aletheia_development-n8n-1:/tmp/anthropic_cred.json
-                
-                if docker exec aletheia_development-n8n-1 n8n import:credentials --input=/tmp/anthropic_cred.json 2>&1 | grep -q "Successfully imported.*credential"; then
-                    # Add to shared_credentials table
-                    docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
-                        "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
-                         VALUES ('eT6Unj67DfYj73os', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
-                    
-                    echo -e "${GREEN}✓ Anthropic API credential created and linked to project${NC}"
-                else
-                    echo -e "${YELLOW}⚠ Failed to import Anthropic credential${NC}"
-                fi
-                
-                # Clean up
-                rm -f "${ALETHEIA_TEMP}/n8n_anthropic_cred.json"
-                docker exec aletheia_development-n8n-1 rm -f /tmp/anthropic_cred.json 2>/dev/null || true
-            else
-                # Ensure credential is linked to project
-                docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
-                    "INSERT OR REPLACE INTO shared_credentials (credentialsId, projectId, role, createdAt, updatedAt)
-                     VALUES ('eT6Unj67DfYj73os', '$PROJECT_ID', 'credential:owner', datetime('now'), datetime('now'));" 2>/dev/null
-                
-                echo -e "${GREEN}✓ Anthropic API credential already exists${NC}"
-            fi
-        fi
-        
-        # Run credential manager to link credentials to workflow nodes
+        # Run credential manager to create and link credentials 
         if [ -n "${ANTHROPIC_API_KEY}" ] || [ -n "${DB_PASSWORD}" ]; then
-            echo -e "${BLUE}Linking credentials to workflows...${NC}"
-            
-            # Run the credential manager script inside the container
+            # Use the reliable credential management system
             if docker exec aletheia_development-n8n-1 sh -c "cd /scripts && ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' ./manage-credentials.sh" &>/dev/null 2>&1; then
-                echo -e "${GREEN}✓ Credentials linked to workflows${NC}"
+                echo -e "${GREEN}✓ Credentials configured successfully${NC}"
                 
                 # Restart n8n to reload workflows with updated credentials
                 echo -e "${BLUE}Restarting n8n to apply credential changes...${NC}"
@@ -545,7 +445,7 @@ EOF
                     fi
                 fi
             else
-                echo -e "${YELLOW}⚠ Could not run credential manager${NC}"
+                echo -e "${YELLOW}⚠ Could not configure credentials${NC}"
                 echo "  You may need to manually configure credentials in n8n UI"
             fi
         fi

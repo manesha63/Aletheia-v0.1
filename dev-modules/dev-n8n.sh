@@ -1560,9 +1560,6 @@ EOF
                 # Try to find API key file in container
                 if $DOCKER_COMPOSE exec -T n8n test -f /data/.n8n/.api-key 2>/dev/null; then
                     API_KEY=$($DOCKER_COMPOSE exec -T n8n cat /data/.n8n/.api-key 2>/dev/null)
-                    if [ -n "$API_KEY" ]; then
-                        echo -e "${GREEN}✓${NC} Using API key for authentication"
-                    fi
                 fi
                 
                 echo "Method: HTTP POST"
@@ -1572,12 +1569,13 @@ EOF
                 
                 # Make request with or without API key
                 if [ -n "$API_KEY" ]; then
+                    echo -e "${GREEN}✓${NC} Using API key for authentication"
                     response=$(curl -s -w "\n%{http_code}" -X POST "$webhook_url" \
                         -H "Content-Type: application/json" \
                         -H "X-N8N-API-KEY: $API_KEY" \
                         -d "$test_payload" 2>/dev/null)
                 else
-                    echo -e "${YELLOW}⚠${NC} No API key found, attempting without authentication..."
+                    echo -e "${BLUE}ℹ${NC} Testing webhook (no API key required)..."
                     response=$(curl -s -w "\n%{http_code}" -X POST "$webhook_url" \
                         -H "Content-Type: application/json" \
                         -d "$test_payload" 2>/dev/null)

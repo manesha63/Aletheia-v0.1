@@ -70,12 +70,52 @@ test_postgres_connection() {
     local password="$5"
     
     # Use n8n's built-in pg module
-    cat > /tmp/test_connection.js << EOF
-const path = require('path');
-// Add n8n's node_modules to the path
-require('module').paths.push('/usr/local/lib/node_modules/n8n/node_modules');
-
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Check if TypeScript version exists and is compiled
+    if [ -f "$script_dir/test-connection.js" ]; then
+        # Use the compiled TypeScript version
+        if DB_HOST="$host" DB_PORT="$port" DB_NAME="$database" DB_USER="$user" DB_PASSWORD="$password" \
+           node "$script_dir/test-connection.js" 2>&1 | grep -q "SUCCESS"; then
+            return 0
+        else
+            DB_HOST="$host" DB_PORT="$port" DB_NAME="$database" DB_USER="$user" DB_PASSWORD="$password" \
+            node "$script_dir/test-connection.js" 2>&1
+            return 1
+        fi
+    else
+        # Fallback to safer JavaScript version
+        cat > /tmp/test_connection_safe.js << EOF
 const { Client } = require('pg');
+
+// Safe module path handling - avoid the problematic require('module').paths
+function setupModulePaths() {
+    // Use NODE_PATH instead of modifying require.paths
+    const n8nPaths = [
+        '/usr/local/lib/node_modules/n8n/node_modules',
+        '/app/node_modules',
+        '/home/node/.n8n/node_modules'
+    ];
+    
+    const currentPath = process.env.NODE_PATH || '';
+    const existingPaths = currentPath.split(':').filter(Boolean);
+    
+    for (const path of n8nPaths) {
+        if (!existingPaths.includes(path)) {
+            existingPaths.push(path);
+        }
+    }
+    
+    process.env.NODE_PATH = existingPaths.join(':');
+    try {
+        require('module')._initPaths();
+    } catch (error) {
+        console.warn('Could not initialize module paths, using default resolution');
+    }
+}
+
+setupModulePaths();
+
 const client = new Client({
     host: '${host}',
     port: ${port},
@@ -99,16 +139,16 @@ client.connect()
         process.exit(1);
     });
 EOF
-    
-    # Try to test with node using n8n's pg library
-    if cd /usr/local/lib/node_modules/n8n && node /tmp/test_connection.js 2>&1 | grep -q "SUCCESS"; then
-        rm -f /tmp/test_connection.js
-        return 0
-    else
-        # Show the actual error for debugging
-        cd /usr/local/lib/node_modules/n8n && node /tmp/test_connection.js 2>&1
-        rm -f /tmp/test_connection.js
-        return 1
+        
+        # Try to test with the safer version
+        if cd /usr/local/lib/node_modules/n8n && node /tmp/test_connection_safe.js 2>&1 | grep -q "SUCCESS"; then
+            rm -f /tmp/test_connection_safe.js
+            return 0
+        else
+            cd /usr/local/lib/node_modules/n8n && node /tmp/test_connection_safe.js 2>&1
+            rm -f /tmp/test_connection_safe.js
+            return 1
+        fi
     fi
 }
 

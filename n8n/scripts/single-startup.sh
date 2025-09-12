@@ -305,10 +305,28 @@ cleanup_duplicates() {
 main() {
     log_info "=== n8n Single Startup Script ==="
     
-    # Ensure custom nodes directory exists
+    # Ensure custom nodes directory exists and restore from global modules
     if [ ! -d "/data/.n8n/custom" ]; then
         log_info "Creating custom nodes directory..."
         mkdir -p /data/.n8n/custom
+    fi
+    
+    # Restore custom nodes from global node_modules to tmpfs location
+    log_info "Restoring custom nodes from global modules..."
+    restored_count=0
+    for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do
+        if [ -d "$node_dir" ]; then
+            node_name=$(basename "$node_dir")
+            cp -r "$node_dir" "/data/.n8n/custom/"
+            log_success "Restored: $node_name"
+            restored_count=$((restored_count + 1))
+        fi
+    done
+    
+    if [ $restored_count -gt 0 ]; then
+        log_success "Restored $restored_count custom nodes"
+    else
+        log_warning "No custom nodes found to restore"
     fi
     
     # Start n8n in background for database initialization

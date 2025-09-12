@@ -619,8 +619,13 @@ handle_n8n_command() {
                     $DOCKER_COMPOSE build n8n
                     
                     echo ""
+                    echo -e "${CYAN}4. Restarting n8n service...${NC}"
+                    $DOCKER_COMPOSE restart n8n
+                    
+                    echo ""
                     echo -e "${GREEN}Rebuild complete!${NC}"
-                    echo "Restart n8n to load the updated nodes: ./dev restart n8n"
+                    echo -e "${GREEN}✓${NC} Custom nodes have been rebuilt and n8n has been restarted"
+                    echo "Custom nodes should now be available in the n8n interface"
                     ;;
                     
                 *)

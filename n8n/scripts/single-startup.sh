@@ -233,7 +233,7 @@ EOF
             local basename=$(basename "$workflow_file")
             
             # Extract workflow name from JSON
-            local workflow_name=$(echo '[]' | jq -r --slurpfile workflow "$workflow_file" '$workflow[0].name // empty' 2>/dev/null || echo "")
+            local workflow_name=$(jq -r ".[0].name // empty" "$workflow_file" 2>/dev/null || echo "")
             
             if [ -n "$workflow_name" ]; then
                 # Check if workflow exists in database

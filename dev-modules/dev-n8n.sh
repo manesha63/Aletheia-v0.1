@@ -285,7 +285,7 @@ handle_n8n_command() {
                     if ! check_service_running "n8n"; then
                         exit $EXIT_SERVICE_UNAVAILABLE
                     fi
-                    
+
                     echo "This will sync the n8n database with files in workflow_json/"
                     echo "- Workflows without files will be removed"
                     echo "- New files will be imported as workflows"
@@ -297,23 +297,23 @@ handle_n8n_command() {
                         $DOCKER_COMPOSE exec -T n8n /bin/sh -c '
                             # Source the sync function
                             . /scripts/single-startup.sh source 2>/dev/null || true
-                            
+
                             # Define required variables
                             DB_PATH="/data/.n8n/database.sqlite"
                             WORKFLOW_SOURCE="/workflow_json"
-                            
+
                             # Define logging functions if not available
                             if ! command -v log_info >/dev/null 2>&1; then
                                 log_info() { echo "[sync] $1"; }
                                 log_success() { echo "[sync] ✓ $1"; }
                                 log_warning() { echo "[sync] ⚠ $1"; }
                             fi
-                            
+
                             # Define sqlite helper if not available
                             if ! command -v sqlite_exec_with_retry >/dev/null 2>&1; then
                                 sqlite_exec_with_retry() { sqlite3 "$DB_PATH" "$1"; }
                             fi
-                            
+
                             # Run sync
                             if command -v sync_workflows >/dev/null 2>&1; then
                                 sync_workflows
@@ -321,6 +321,60 @@ handle_n8n_command() {
                                 echo "Sync function not available, please restart n8n to trigger sync"
                             fi
                         '
+                    else
+                        echo "Cancelled"
+                    fi
+                    ;;
+
+                save)
+                    echo -e "${BLUE}Saving workflows to workflow_json/...${NC}"
+                    if ! check_service_running "n8n"; then
+                        exit $EXIT_SERVICE_UNAVAILABLE
+                    fi
+
+                    echo "This will export all active n8n workflows back to workflow_json/"
+                    echo "- Existing files will be overwritten"
+                    echo "- New workflows will be added as {name}-workflow.json"
+                    echo ""
+                    read -p "Continue? (y/N) " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        # Get list of workflows and save each
+                        workflow_list=$($DOCKER_COMPOSE exec -T n8n n8n list:workflow 2>/dev/null | grep -v "User settings" | grep -v "Error tracking" | grep "|")
+
+                        if [ -z "$workflow_list" ]; then
+                            echo -e "${YELLOW}No workflows found to save${NC}"
+                            exit 0
+                        fi
+
+                        saved_count=0
+                        # Use process substitution to avoid subshell issues
+                        while IFS='|' read -r workflow_id workflow_name rest; do
+                            workflow_id=$(echo "$workflow_id" | tr -d ' ')
+                            workflow_name=$(echo "$workflow_name" | tr -d ' ' | tr '/' '_')
+
+                            if [ -z "$workflow_id" ] || [ "$workflow_id" = "ID" ]; then
+                                continue
+                            fi
+
+                            output_file="workflow_json/${workflow_name}-workflow.json"
+                            echo -n "  • Saving workflow '$workflow_name' to $output_file... "
+
+                            # Export workflow to container temp file (redirect stdin to prevent loop interference)
+                            if $DOCKER_COMPOSE exec -T n8n n8n export:workflow --id="$workflow_id" --output="/tmp/save_$workflow_id.json" </dev/null 2>/dev/null; then
+                                # Copy from container to host with proper name
+                                docker cp "$($DOCKER_COMPOSE ps -q n8n):/tmp/save_$workflow_id.json" "$output_file" 2>/dev/null
+                                $DOCKER_COMPOSE exec -T n8n rm -f "/tmp/save_$workflow_id.json" </dev/null 2>/dev/null
+                                echo -e "${GREEN}✓${NC}"
+                                saved_count=$((saved_count + 1))
+                            else
+                                echo -e "${RED}✗${NC}"
+                            fi
+                        done <<EOF
+$workflow_list
+EOF
+
+                        echo -e "${GREEN}✓ Saved workflows to workflow_json/. Changes are ready to commit.${NC}"
                     else
                         echo "Cancelled"
                     fi
@@ -339,6 +393,7 @@ handle_n8n_command() {
                     echo "  execute     - Execute a specific workflow"
                     echo "  status      - Show workflow status"
                     echo "  sync        - Sync workflows with workflow_json/ directory"
+                    echo "  save        - Save workflows back to workflow_json/ for git commit"
                     ;;
             esac
             ;;

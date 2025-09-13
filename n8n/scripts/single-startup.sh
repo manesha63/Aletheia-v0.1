@@ -121,6 +121,41 @@ wait_for_migrations() {
     return 0
 }
 
+# Wait for n8n startup to stabilize before restart
+wait_for_n8n_stable() {
+    local max_wait=60
+    local waited=0
+    local stable_time=10  # Wait for n8n to be stable for 10 seconds
+    
+    log_info "Waiting for n8n startup to stabilize..."
+    
+    # Wait for initial startup
+    sleep 15
+    
+    # Check if process is stable (not consuming high CPU)
+    local stable_start=$(date +%s)
+    while [ $waited -lt $max_wait ]; do
+        if kill -0 $N8N_PID 2>/dev/null; then
+            local current_time=$(date +%s)
+            local stable_duration=$((current_time - stable_start))
+            
+            if [ $stable_duration -ge $stable_time ]; then
+                log_success "n8n startup stabilized"
+                return 0
+            fi
+        else
+            log_error "n8n process died during startup"
+            return 1
+        fi
+        
+        sleep 2
+        waited=$((waited + 2))
+    done
+    
+    log_warning "n8n stability timeout"
+    return 0
+}
+
 # Setup owner account (only if needed)
 setup_owner_once() {
     local IS_SETUP=$(sqlite_exec_with_retry "SELECT value FROM settings WHERE key='userManagement.isInstanceOwnerSetUp'" 2>/dev/null || echo "")
@@ -339,6 +374,11 @@ main() {
         log_error "Failed to wait for migrations"
         kill $N8N_PID 2>/dev/null || true
         exit 1
+    fi
+    
+    # Wait for n8n startup to stabilize (includes custom node discovery)
+    if ! wait_for_n8n_stable; then
+        log_warning "n8n startup may not be fully stable"
     fi
     
     # Now stop n8n to perform setup without conflicts

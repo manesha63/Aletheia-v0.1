@@ -6,8 +6,8 @@ set -e
 
 # Configuration
 DB_PATH="/data/.n8n/database.sqlite"
-IMPORT_MARKER="/data/.n8n/.workflows-imported-v2"
 WORKFLOW_SOURCE="/workflow_json"  # Mount from host, never bake into image
+# Note: IMPORT_MARKER removed - smart sync doesn't need it
 SETUP_EMAIL="${N8N_SETUP_EMAIL:-velvetmoon222999@gmail.com}"
 SETUP_PASSWORD="${N8N_SETUP_PASSWORD:-admin123}"
 
@@ -195,50 +195,85 @@ COMMIT;"
     fi
 }
 
-# Import workflows ONLY from workflow_json, ONLY once
-import_workflows_once() {
-    # Check marker
-    if [ -f "$IMPORT_MARKER" ]; then
-        log_info "Workflows already imported (marker found)"
-        return 0
-    fi
-    
-    # Check if workflows exist
-    local WORKFLOW_COUNT=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
-    
-    if [ "$WORKFLOW_COUNT" -gt "0" ]; then
-        log_info "Found $WORKFLOW_COUNT existing workflow(s), skipping import"
-        touch "$IMPORT_MARKER"
-        return 0
-    fi
-    
-    # Import from workflow_json ONLY
+# Smart sync: Keep database in sync with workflow_json directory
+# This replaces the old import-once pattern with continuous sync
+sync_workflows() {
     if [ ! -d "$WORKFLOW_SOURCE" ]; then
         log_warning "Workflow source directory not found: $WORKFLOW_SOURCE"
         return 0
     fi
     
-    log_info "Importing workflows from $WORKFLOW_SOURCE..."
+    log_info "Syncing workflows with $WORKFLOW_SOURCE..."
     
+    # Step 1: Remove workflows that don't have corresponding files
+    local removed_count=0
+    local existing_workflows=$(sqlite_exec_with_retry "SELECT name FROM workflow_entity" 2>/dev/null || echo "")
+    
+    if [ -n "$existing_workflows" ]; then
+        # Use process substitution to avoid subshell issues with counters
+        while IFS= read -r workflow_name; do
+            if [ -n "$workflow_name" ]; then
+                # Check if corresponding file exists (name-workflow.json pattern)
+                expected_file="$WORKFLOW_SOURCE/${workflow_name}-workflow.json"
+                if [ ! -f "$expected_file" ]; then
+                    log_info "  Removing workflow '$workflow_name' (no corresponding file)"
+                    sqlite_exec_with_retry "DELETE FROM workflow_entity WHERE name='$workflow_name'"
+                    removed_count=$((removed_count + 1))
+                fi
+            fi
+        done <<EOF
+$existing_workflows
+EOF
+    fi
+    
+    # Step 2: Import workflows that don't exist in database
+    local imported_count=0
     for workflow_file in $WORKFLOW_SOURCE/*.json; do
         if [ -f "$workflow_file" ]; then
             local basename=$(basename "$workflow_file")
-            log_info "  Importing: $basename"
             
-            if n8n import:workflow --input="$workflow_file" 2>/dev/null; then
-                log_success "  Imported: $basename"
+            # Extract workflow name from JSON
+            local workflow_name=$(echo '[]' | jq -r --slurpfile workflow "$workflow_file" '$workflow[0].name // empty' 2>/dev/null || echo "")
+            
+            if [ -n "$workflow_name" ]; then
+                # Check if workflow exists in database
+                local existing_count=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity WHERE name='$workflow_name'" 2>/dev/null || echo "0")
+                
+                if [ "$existing_count" -eq "0" ]; then
+                    log_info "  Importing: $basename → '$workflow_name'"
+                    
+                    if n8n import:workflow --input="$workflow_file" 2>/dev/null; then
+                        log_success "  Imported: $workflow_name"
+                        imported_count=$((imported_count + 1))
+                    else
+                        log_warning "  Failed to import: $basename"
+                    fi
+                else
+                    log_info "  Workflow '$workflow_name' already exists, skipping"
+                fi
             else
-                log_warning "  Failed to import: $basename"
+                log_warning "  Could not extract workflow name from: $basename"
             fi
         fi
     done
     
-    # Mark as complete
-    touch "$IMPORT_MARKER"
+    # Step 3: Activate all workflows (ensure they're active after import)
+    if [ "$imported_count" -gt "0" ]; then
+        sqlite_exec_with_retry "UPDATE workflow_entity SET active=1 WHERE active=0"
+        log_success "Activated $imported_count new workflow(s)"
+    fi
     
-    # Activate workflows
-    sqlite_exec_with_retry "UPDATE workflow_entity SET active=1 WHERE active=0"
-    log_success "Workflows activated"
+    # Summary
+    local final_count=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
+    log_success "Workflow sync complete: $final_count workflow(s) active (imported: $imported_count, removed: $removed_count)"
+    
+    # List current workflows for confirmation
+    if [ "$final_count" -gt "0" ]; then
+        local workflow_list=$(sqlite_exec_with_retry "SELECT name FROM workflow_entity ORDER BY name" 2>/dev/null || echo "")
+        if [ -n "$workflow_list" ]; then
+            log_info "Active workflows: $(echo "$workflow_list" | tr '\n' ', ' | sed 's/,$//')"
+        fi
+    fi
 }
 
 # Setup credentials from environment
@@ -318,21 +353,15 @@ EOF
     fi
 }
 
-# Clean up any duplicate or old workflows
+# Legacy cleanup function - replaced with smart sync
+# This function is kept for compatibility but now just logs
 cleanup_duplicates() {
-    log_info "Cleaning up duplicate workflows..."
+    log_info "Legacy cleanup disabled - using smart sync instead"
     
-    # Remove all workflows except 'central'
-    sqlite_exec_with_retry "DELETE FROM workflow_entity WHERE name != 'central'"
-    
-    # If no 'central' workflow exists, we'll import it
-    local CENTRAL_COUNT=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity WHERE name='central'" 2>/dev/null || echo "0")
-    
-    if [ "$CENTRAL_COUNT" -eq "0" ]; then
-        log_warning "No 'central' workflow found, will import from workflow_json"
-        rm -f "$IMPORT_MARKER"  # Force reimport
-    else
-        log_success "Found 'central' workflow"
+    # Check for any orphaned workflows (defensive)
+    local workflow_count=$(sqlite_exec_with_retry "SELECT COUNT(*) FROM workflow_entity" 2>/dev/null || echo "0")
+    if [ "$workflow_count" -gt "10" ]; then
+        log_warning "Found $workflow_count workflows - this seems excessive, consider reviewing"
     fi
 }
 
@@ -389,8 +418,8 @@ main() {
     # Run setup steps with database now available and no locks
     log_info "Running setup steps..."
     setup_owner_once
-    cleanup_duplicates
-    import_workflows_once
+    cleanup_duplicates  # Legacy function - now just logs
+    sync_workflows      # New smart sync replaces import_workflows_once
     setup_credentials_once
     
     # Always run credential manager if API keys are present

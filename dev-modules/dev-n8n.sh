@@ -280,6 +280,52 @@ handle_n8n_command() {
                     $DOCKER_COMPOSE exec -T n8n n8n list:workflow 2>/dev/null || echo "None"
                     ;;
                     
+                sync)
+                    echo -e "${BLUE}Manually syncing workflows with workflow_json/...${NC}"
+                    if ! check_service_running "n8n"; then
+                        exit $EXIT_SERVICE_UNAVAILABLE
+                    fi
+                    
+                    echo "This will sync the n8n database with files in workflow_json/"
+                    echo "- Workflows without files will be removed"
+                    echo "- New files will be imported as workflows"
+                    echo ""
+                    read -p "Continue? (y/N) " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        # Call the sync function from the startup script
+                        $DOCKER_COMPOSE exec -T n8n /bin/sh -c '
+                            # Source the sync function
+                            . /scripts/single-startup.sh source 2>/dev/null || true
+                            
+                            # Define required variables
+                            DB_PATH="/data/.n8n/database.sqlite"
+                            WORKFLOW_SOURCE="/workflow_json"
+                            
+                            # Define logging functions if not available
+                            if ! command -v log_info >/dev/null 2>&1; then
+                                log_info() { echo "[sync] $1"; }
+                                log_success() { echo "[sync] ✓ $1"; }
+                                log_warning() { echo "[sync] ⚠ $1"; }
+                            fi
+                            
+                            # Define sqlite helper if not available
+                            if ! command -v sqlite_exec_with_retry >/dev/null 2>&1; then
+                                sqlite_exec_with_retry() { sqlite3 "$DB_PATH" "$1"; }
+                            fi
+                            
+                            # Run sync
+                            if command -v sync_workflows >/dev/null 2>&1; then
+                                sync_workflows
+                            else
+                                echo "Sync function not available, please restart n8n to trigger sync"
+                            fi
+                        '
+                    else
+                        echo "Cancelled"
+                    fi
+                    ;;
+                    
                 *)
                     echo "Usage: ./dev n8n workflows <command>"
                     echo ""
@@ -292,6 +338,7 @@ handle_n8n_command() {
                     echo "  deactivate  - Deactivate all (or specific) workflow(s)"
                     echo "  execute     - Execute a specific workflow"
                     echo "  status      - Show workflow status"
+                    echo "  sync        - Sync workflows with workflow_json/ directory"
                     ;;
             esac
             ;;

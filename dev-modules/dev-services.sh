@@ -198,9 +198,9 @@ service_up() {
             echo -e "${GREEN}✓ Service $service started${NC}"
         fi
     else
-        echo -e "${BLUE}Starting all Aletheia services...${NC}"
-        # Start all services defined in docker-compose.yml
-        $DOCKER_COMPOSE up -d
+        echo -e "${BLUE}Starting essential Aletheia services...${NC}"
+        # Start only essential services, skip slow-building optional ones (haystack, elasticsearch)
+        $DOCKER_COMPOSE up -d db redis n8n web court-processor lawyer-chat ai-portal ai-portal-nginx docker-api
         echo ""
         echo -e "${GREEN}✓ Services started successfully!${NC}"
         echo ""

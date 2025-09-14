@@ -53,6 +53,7 @@ show_help() {
     echo "  docs verify     Check documentation accuracy"
     echo ""
     echo -e "${CYAN}🤖 n8n Workflow Automation:${NC}"
+    echo "  execute         Execute workflows with parameters"
     echo "  n8n init        Complete setup wizard"
     echo "  n8n test        Test workflows (webhook or by name)"
     echo "  n8n validate    Health check with fixes"

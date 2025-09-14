@@ -198,7 +198,39 @@ case "$1" in
         fi
         handle_deps_command "$2" "${@:3}"
         ;;
-        
+
+    # Workflow Execution
+    execute)
+        workflow_name="$2"
+        test_data="$3"
+
+        if [ -z "$workflow_name" ]; then
+            echo "Usage: ./dev execute <workflow-name> [parameters]"
+            echo ""
+            echo "Execute workflows directly via their webhook endpoints"
+            echo ""
+            source dev-modules/dev-execute.sh
+            list_executable_workflows
+            echo ""
+            echo "Examples:"
+            echo "  ./dev execute search gilstrap              # Simple parameter"
+            echo "  ./dev execute central \"legal analysis\"     # Quoted parameter"
+            echo "  ./dev execute search '{\"query\":\"tax\"}'   # JSON parameter"
+            exit 1
+        fi
+
+        # Check if n8n is running
+        if ! docker ps --format "table {{.Names}}\t{{.Status}}" | grep -q "aletheia_development-n8n-1.*Up"; then
+            echo -e "${RED}❌ n8n is not running${NC}"
+            echo "Start it with: ./dev up"
+            exit 1
+        fi
+
+        # Execute workflow
+        source dev-modules/dev-execute.sh
+        execute_workflow "$workflow_name" "$test_data"
+        ;;
+
     # Help
     help|--help|-h|"")
         show_help

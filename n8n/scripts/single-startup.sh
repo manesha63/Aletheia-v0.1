@@ -276,6 +276,40 @@ EOF
     fi
 }
 
+# Create execution registry for workflows
+create_execution_registry() {
+    log_info "Building execution registry..."
+
+    local registry_file="/tmp/n8n_workflow_registry"
+    echo "# Auto-generated workflow execution registry" > "$registry_file"
+    echo "# Format: workflow_name|webhook_id|http_method" >> "$registry_file"
+    echo "# Generated: $(date)" >> "$registry_file"
+
+    local registry_count=0
+
+    if [ -d "$WORKFLOW_SOURCE" ]; then
+        for workflow_file in $WORKFLOW_SOURCE/*.json; do
+            if [ -f "$workflow_file" ]; then
+                local workflow_name=$(basename "$workflow_file" .json | sed 's/-workflow$//')
+                local webhook_id=$(jq -r '.[0].nodes[] | select(.type=="n8n-nodes-base.webhook") | .webhookId' "$workflow_file" 2>/dev/null)
+                local http_method=$(jq -r '.[0].nodes[] | select(.type=="n8n-nodes-base.webhook") | .parameters.httpMethod' "$workflow_file" 2>/dev/null)
+
+                if [ "$webhook_id" != "null" ] && [ -n "$webhook_id" ]; then
+                    echo "$workflow_name|$webhook_id|$http_method" >> "$registry_file"
+                    registry_count=$((registry_count + 1))
+                    log_info "  Registered: $workflow_name → webhook $webhook_id"
+                fi
+            fi
+        done
+    fi
+
+    if [ "$registry_count" -gt "0" ]; then
+        log_success "Execution registry created: $registry_count workflow(s) executable via ./dev execute"
+    else
+        log_warning "No executable workflows found (no webhook triggers)"
+    fi
+}
+
 # Setup credentials from environment
 setup_credentials_once() {
     log_info "Setting up credentials..."
@@ -420,6 +454,7 @@ main() {
     setup_owner_once
     cleanup_duplicates  # Legacy function - now just logs
     sync_workflows      # New smart sync replaces import_workflows_once
+    create_execution_registry  # Build execution registry after sync
     setup_credentials_once
     
     # Always run credential manager if API keys are present

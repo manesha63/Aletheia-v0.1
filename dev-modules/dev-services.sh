@@ -380,7 +380,7 @@ service_up() {
 initialize_n8n_setup() {
     echo ""
     echo -e "${BLUE}Initializing n8n automation platform...${NC}"
-    
+
     # Wait for n8n to be ready (max 60 seconds)
     N8N_READY=false
     for i in {1..60}; do

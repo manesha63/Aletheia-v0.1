@@ -41,8 +41,17 @@ RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \
         echo "Building $(basename $node_dir)..."; \
         cd "$node_dir" && \
         npm install && \
-        (npm run build || echo "Warning: Build had errors for $(basename $node_dir), attempting partial build...") && \
-        (tsc --noEmitOnError false --skipLibCheck || echo "TypeScript compilation completed with warnings for $(basename $node_dir)"); \
+        (npm run build || echo "Warning: Build had errors for $(basename $node_dir), continuing..."); \
+    done
+
+# Ensure icons are copied to dist directories (backup for failed gulp builds)
+RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \
+        echo "Copying icons for $(basename $node_dir)..."; \
+        if [ -d "$node_dir/nodes" ] && [ -d "$node_dir/dist/nodes" ]; then \
+            find "$node_dir/nodes" -name "*.svg" -o -name "*.png" | while read icon_file; do \
+                cp "$icon_file" "$node_dir/dist/nodes/" 2>/dev/null || true; \
+            done; \
+        fi; \
     done
 
 # Clean up build dependencies

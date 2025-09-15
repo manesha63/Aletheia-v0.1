@@ -1003,7 +1003,12 @@ class DocumentIngestionService:
                         document['metadata']['content_length'] = len(content)
                         document['metadata']['opinion_type'] = opinion_data.get('type', '')
                         document['metadata']['page_count'] = opinion_data.get('page_count', 0)
-                        
+
+                        # Enhanced XML parsing for structured content
+                        if content and content.strip().startswith('<opinion'):
+                            enhanced_metadata = self._parse_xml_content(content)
+                            document['metadata'].update(enhanced_metadata)
+
                         # Update stats
                         self.stats['content']['total_characters'] += len(content)
                         if content:
@@ -1011,7 +1016,98 @@ class DocumentIngestionService:
                         
         except Exception as e:
             logger.debug(f"Could not extract opinion content: {e}")
-    
+
+    def _parse_xml_content(self, content: str) -> Dict[str, Any]:
+        """
+        Parse XML structured content to extract enhanced metadata
+
+        Extracts judicial, procedural, and citation information from
+        rich XML opinion content for improved searchability and analysis.
+        """
+        import re
+
+        metadata = {}
+
+        try:
+            # Judge information extraction
+            judge_match = re.search(r'<author[^>]*>([^<]+)</author>', content)
+            if judge_match:
+                full_judge = judge_match.group(1).strip()
+                metadata['xml_judge_full'] = full_judge
+                # Extract just the judge name (before comma or title)
+                judge_name_match = re.search(r'^([A-Z\s\.]+?)(?:,|\s+United|\s+U\.S\.)', full_judge)
+                if judge_name_match:
+                    metadata['xml_judge_name'] = judge_name_match.group(1).strip()
+
+            # Opinion structure analysis
+            opinion_type_match = re.search(r'<opinion type="([^"]+)">', content)
+            if opinion_type_match:
+                metadata['xml_opinion_type'] = opinion_type_match.group(1)
+
+            # Paragraph structure for navigation
+            paragraphs = re.findall(r'<p id="([^"]+)">', content)
+            metadata['xml_paragraph_count'] = len(paragraphs)
+            metadata['xml_has_structure'] = len(paragraphs) > 0
+
+            # Citation extraction from XML tags
+            xml_citations = re.findall(
+                r'<extracted-citation[^>]*>.*?<span[^>]*>([^<]+)</span>.*?</extracted-citation>',
+                content, re.DOTALL
+            )
+            metadata['xml_citation_count'] = len(xml_citations)
+            if xml_citations:
+                metadata['xml_citations'] = xml_citations[:10]  # Store first 10 for preview
+                # Extract citation URLs for network analysis
+                citation_urls = re.findall(r'<extracted-citation[^>]*url="([^"]+)"', content)
+                metadata['xml_citation_urls'] = citation_urls[:10]
+
+            # Page number references for legal citations
+            page_numbers = re.findall(r'<page-number[^>]*label="([^"]+)"', content)
+            metadata['xml_page_count'] = len(page_numbers)
+            if page_numbers:
+                metadata['xml_page_numbers'] = page_numbers[:5]  # First few for reference
+
+            # Legal procedure detection
+            legal_motions = []
+            motion_patterns = [
+                r'Motion to ([^,\.;]{5,50})',
+                r'motion for ([^,\.;]{5,50})',
+                r'([A-Z][^,\.;]*Motion[^,\.;]{5,50})'
+            ]
+            for pattern in motion_patterns:
+                motions = re.findall(pattern, content, re.IGNORECASE)
+                legal_motions.extend([m.strip() for m in motions])
+
+            if legal_motions:
+                # Deduplicate and limit
+                unique_motions = list(set(legal_motions))[:5]
+                metadata['xml_legal_motions'] = unique_motions
+                metadata['xml_motion_count'] = len(unique_motions)
+
+            # Federal rules and statutes
+            fed_rules = re.findall(
+                r'(?:Fed\.|Federal)\s*R\s*[\w\.]*\s*(?:Civ\.|Evid\.|Crim\.|App\.)\s*P\s*[\d\.]+',
+                content
+            )
+            if fed_rules:
+                metadata['xml_federal_rules'] = list(set(fed_rules))[:5]
+
+            statutes = re.findall(r'\d+\s+U\.S\.C\.\s*§\s*\d+', content)
+            if statutes:
+                metadata['xml_statutes'] = list(set(statutes))[:5]
+
+            # Content richness indicators
+            metadata['xml_parsing_enabled'] = True
+            metadata['xml_content_type'] = 'structured_opinion'
+
+            logger.debug(f"XML parsing extracted {len(metadata)} metadata fields")
+
+        except Exception as e:
+            logger.warning(f"XML parsing failed: {e}")
+            metadata['xml_parsing_error'] = str(e)
+
+        return metadata
+
     def _determine_enhanced_document_type(self, cluster_data: Dict[str, Any]) -> str:
         """
         Determine document type based on cluster metadata

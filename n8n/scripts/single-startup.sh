@@ -409,19 +409,17 @@ main() {
         mkdir -p /data/.n8n/custom
     fi
     
-    # Restore custom nodes from persistent storage to tmpfs location
-    log_info "Restoring custom nodes from persistent storage..."
+    # Restore custom nodes from global node_modules to tmpfs location
+    log_info "Restoring custom nodes from global modules..."
     restored_count=0
-    if [ -d "/usr/local/share/n8n-custom-nodes" ]; then
-        for node_dir in /usr/local/share/n8n-custom-nodes/*; do
-            if [ -d "$node_dir" ]; then
-                node_name=$(basename "$node_dir")
-                cp -r "$node_dir" "/data/.n8n/custom/"
-                log_success "Restored: $node_name"
-                restored_count=$((restored_count + 1))
-            fi
-        done
-    fi
+    for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do
+        if [ -d "$node_dir" ]; then
+            node_name=$(basename "$node_dir")
+            cp -r "$node_dir" "/data/.n8n/custom/"
+            log_success "Restored: $node_name"
+            restored_count=$((restored_count + 1))
+        fi
+    done
     
     if [ $restored_count -gt 0 ]; then
         log_success "Restored $restored_count custom nodes"

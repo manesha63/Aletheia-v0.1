@@ -223,7 +223,7 @@ async def test_small_batch():
         return
     
     # First, search for recent patent cases in E.D. Texas
-    from services.courtlistener_service import CourtListenerService
+    from services.courtlistener import CourtListenerService
     
     cl_service = CourtListenerService(cl_token)
     

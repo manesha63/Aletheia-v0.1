@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv()
 
 # Test direct CourtListener access first
-from services.courtlistener_service import CourtListenerService
+from services.courtlistener import CourtListenerService
 from services.document_ingestion_service import DocumentIngestionService
 
 

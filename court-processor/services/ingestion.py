@@ -15,7 +15,7 @@ import json
 import tempfile
 import os
 
-from services.courtlistener_service import CourtListenerService
+from services.courtlistener import CourtListenerService
 from services.database import get_db_connection
 from services.recap.authenticated_client import AuthenticatedRECAPClient
 from pdf_processor import PDFProcessor

@@ -49,7 +49,7 @@ except ImportError:
 
 from services.document_ingestion_service import DocumentIngestionService
 from services.recap.authenticated_client import AuthenticatedRECAPClient
-from services.courtlistener_service import CourtListenerService
+from services.courtlistener import CourtListenerService
 
 # Load environment variables
 load_dotenv()

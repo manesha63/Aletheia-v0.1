@@ -349,7 +349,21 @@ async def get_document_simple(document_id: int):
                 "judge": metadata.get('judge_name'),
                 "date_filed": metadata.get('date_filed'),
                 "court": metadata.get('court_id')
-            }
+            },
+            # Enhanced XML parsing metadata (if available)
+            "xml_metadata": {
+                "parsing_enabled": metadata.get('xml_parsing_enabled', False),
+                "judge_full": metadata.get('xml_judge_full'),
+                "judge_name": metadata.get('xml_judge_name'),
+                "opinion_type": metadata.get('xml_opinion_type'),
+                "citation_count": metadata.get('xml_citation_count', 0),
+                "paragraph_count": metadata.get('xml_paragraph_count', 0),
+                "citations": metadata.get('xml_citations', []),
+                "legal_motions": metadata.get('xml_legal_motions', []),
+                "federal_rules": metadata.get('xml_federal_rules', []),
+                "statutes": metadata.get('xml_statutes', []),
+                "page_numbers": metadata.get('xml_page_numbers', [])
+            } if metadata.get('xml_parsing_enabled') else None
         }
         
     except HTTPException:

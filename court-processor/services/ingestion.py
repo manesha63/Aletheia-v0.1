@@ -145,6 +145,44 @@ class DocumentIngestionService:
         
         results['statistics'] = self.get_statistics()
         return results
+
+    async def collect_documents(self,
+                              court_id: str,
+                              judge_name: Optional[str] = None,
+                              date_after: Optional[str] = None,
+                              date_before: Optional[str] = None,
+                              max_documents: int = 100,
+                              run_pipeline: bool = False,
+                              extract_pdfs: bool = True,
+                              store_to_db: bool = True,
+                              **kwargs) -> Dict[str, Any]:
+        """
+        CLI-compatible wrapper for unified collection with intelligent routing
+
+        Provides backward compatibility for CLI while leveraging the new unified
+        collection strategy that automatically selects optimal approach based on parameters.
+
+        Args:
+            court_id: Court identifier (e.g., 'txed')
+            judge_name: Judge name for enhanced collection (triggers rich metadata extraction)
+            date_after: Start date filter (YYYY-MM-DD)
+            date_before: End date filter (currently not used in underlying API)
+            max_documents: Maximum documents to collect
+            run_pipeline: Whether to run enhancement pipeline (not implemented)
+            extract_pdfs: Whether to extract PDF content
+            store_to_db: Whether to store results in database
+
+        Returns:
+            Collection results with documents, statistics, and performance metrics
+        """
+        # Use unified collection with intelligent routing
+        return await self.ingest_from_courtlistener(
+            court_ids=[court_id],
+            date_after=date_after,
+            document_types=['opinions'],
+            max_per_court=max_documents,
+            judge_name=judge_name
+        )
     
     def _determine_collection_strategy(self,
                                      judge_name: Optional[str] = None,

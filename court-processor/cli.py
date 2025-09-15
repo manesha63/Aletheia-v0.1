@@ -837,42 +837,51 @@ def court(court_id, years, date_after, date_before, judge, limit, enhance, extra
                 
                 # Document statistics
                 console.print(f"\n[bold]Document Statistics:[/bold]")
-                console.print(f"  Total fetched: {stats['total_fetched']}")
-                console.print(f"  New documents: {stats['new_documents']}")
-                console.print(f"  Duplicates: {stats['duplicates']}")
-                console.print(f"  With content: {stats['with_content']}")
-                console.print(f"  With judges: {stats['with_judges']}")
-                
+                processing = stats.get('processing', {})
+                storage = stats.get('storage', {})
+                sources = stats.get('sources', {})
+                summary = stats.get('summary', {})
+
+                console.print(f"  Total processed: {processing.get('total_documents', 0)}")
+                console.print(f"  Documents stored: {storage.get('documents_stored', 0)}")
+                console.print(f"  Documents updated: {storage.get('documents_updated', 0)}")
+                console.print(f"  Enhanced collection: {sources.get('courtlistener_enhanced', 0)}")
+                console.print(f"  Standard collection: {sources.get('courtlistener_opinions', 0)}")
+
                 # Calculate rates
-                if stats['new_documents'] > 0:
-                    content_rate = (stats['with_content'] / stats['new_documents']) * 100
-                    judge_rate = (stats['with_judges'] / stats['new_documents']) * 100
-                    console.print(f"\n[bold]Attribution Rates:[/bold]")
-                    console.print(f"  Content extraction: {content_rate:.1f}%")
-                    console.print(f"  Judge attribution: {judge_rate:.1f}%")
+                total_docs = processing.get('total_documents', 0)
+                if total_docs > 0:
+                    storage_rate = summary.get('storage_success_rate', 0)
+                    extraction_rate = summary.get('pdf_extraction_rate', 0)
+                    console.print(f"\n[bold]Success Rates:[/bold]")
+                    console.print(f"  Storage success: {storage_rate:.1f}%")
+                    console.print(f"  PDF extraction: {extraction_rate:.1f}%")
+                    console.print(f"  Average document size: {summary.get('average_document_size', 0):.0f} chars")
                 
                 # Enhancement statistics
                 if enhance:
                     console.print(f"\n[bold]Enhancement Statistics:[/bold]")
                     console.print(f"  Pipeline enhanced: {stats['pipeline_enhanced']}")
                 
-                if extract_pdfs and stats['pdf_extracted'] > 0:
-                    console.print(f"  PDF extractions: {stats['pdf_extracted']}")
+                if extract_pdfs and processing.get('pdfs_extracted', 0) > 0:
+                    console.print(f"  PDF extractions: {processing.get('pdfs_extracted', 0)}")
                 
                 if store:
-                    console.print(f"  Stored to database: {stats['stored_to_db']}")
+                    total_stored = storage.get('documents_stored', 0) + storage.get('documents_updated', 0)
+                    console.print(f"  Stored to database: {total_stored}")
                 
-                # Performance metrics
-                console.print(f"\n[bold]Performance Metrics:[/bold]")
-                console.print(f"  Fetch time: {perf['fetch_time']:.2f}s")
-                if enhance:
-                    console.print(f"  Pipeline time: {perf['pipeline_time']:.2f}s")
-                if store:
-                    console.print(f"  Storage time: {perf['storage_time']:.2f}s")
-                console.print(f"  Total time: {perf['total_time']:.2f}s")
+                # Performance metrics (if available)
+                if perf:
+                    console.print(f"\n[bold]Performance Metrics:[/bold]")
+                    console.print(f"  Fetch time: {perf.get('fetch_time', 0):.2f}s")
+                    if enhance:
+                        console.print(f"  Pipeline time: {perf.get('pipeline_time', 0):.2f}s")
+                    if store:
+                        console.print(f"  Storage time: {perf.get('storage_time', 0):.2f}s")
+                    console.print(f"  Total time: {perf.get('total_time', 0):.2f}s")
                 
-                # Show sample documents
-                if results['documents']:
+                # Show sample documents (if available)
+                if results.get('documents'):
                     console.print(f"\n[bold]Sample Documents:[/bold]")
                     for i, doc in enumerate(results['documents'][:3], 1):
                         meta = doc.get('meta', {})
@@ -882,6 +891,8 @@ def court(court_id, years, date_after, date_before, judge, limit, enhance, extra
                         console.print(f"     Date filed: {meta.get('date_filed', 'Unknown')}")
                         console.print(f"     Content: {len(doc.get('content', ''))} chars")
                         console.print(f"     Type: {meta.get('document_type', 'Unknown')}")
+                else:
+                    console.print(f"\n[dim]No sample documents returned (documents processed via database)[/dim]")
                 
                 # Show errors if any
                 if results['errors']:
@@ -968,7 +979,7 @@ def judge(judge_name, court, years, limit):
                 
                 try:
                     service = DocumentIngestionService()
-                        results = await service.collect_documents(
+                    results = await service.collect_documents(
                             court_id=court,
                             judge_name=judge_name,
                             date_after=date_after,

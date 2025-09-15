@@ -834,65 +834,65 @@ def court(court_id, years, date_after, date_before, judge, limit, enhance, extra
                 perf = results.get('performance', {})
                 
                 console.print(f"\n[green]✅ Collection Complete[/green]")
-                    
-                    # Document statistics
-                    console.print(f"\n[bold]Document Statistics:[/bold]")
-                    console.print(f"  Total fetched: {stats['total_fetched']}")
-                    console.print(f"  New documents: {stats['new_documents']}")
-                    console.print(f"  Duplicates: {stats['duplicates']}")
-                    console.print(f"  With content: {stats['with_content']}")
-                    console.print(f"  With judges: {stats['with_judges']}")
-                    
-                    # Calculate rates
-                    if stats['new_documents'] > 0:
-                        content_rate = (stats['with_content'] / stats['new_documents']) * 100
-                        judge_rate = (stats['with_judges'] / stats['new_documents']) * 100
-                        console.print(f"\n[bold]Attribution Rates:[/bold]")
-                        console.print(f"  Content extraction: {content_rate:.1f}%")
-                        console.print(f"  Judge attribution: {judge_rate:.1f}%")
-                    
-                    # Enhancement statistics
-                    if enhance:
-                        console.print(f"\n[bold]Enhancement Statistics:[/bold]")
-                        console.print(f"  Pipeline enhanced: {stats['pipeline_enhanced']}")
-                    
-                    if extract_pdfs and stats['pdf_extracted'] > 0:
-                        console.print(f"  PDF extractions: {stats['pdf_extracted']}")
-                    
-                    if store:
-                        console.print(f"  Stored to database: {stats['stored_to_db']}")
-                    
-                    # Performance metrics
-                    console.print(f"\n[bold]Performance Metrics:[/bold]")
-                    console.print(f"  Fetch time: {perf['fetch_time']:.2f}s")
-                    if enhance:
-                        console.print(f"  Pipeline time: {perf['pipeline_time']:.2f}s")
-                    if store:
-                        console.print(f"  Storage time: {perf['storage_time']:.2f}s")
-                    console.print(f"  Total time: {perf['total_time']:.2f}s")
-                    
-                    # Show sample documents
-                    if results['documents']:
-                        console.print(f"\n[bold]Sample Documents:[/bold]")
-                        for i, doc in enumerate(results['documents'][:3], 1):
-                            meta = doc.get('meta', {})
-                            console.print(f"\n  {i}. {meta.get('case_name', 'Unknown Case')}")
-                            console.print(f"     Court: {meta.get('court', 'Unknown')}")
-                            console.print(f"     Judge: {meta.get('judge_name', 'Unknown')} (confidence: {meta.get('judge_confidence', 0):.2f})")
-                            console.print(f"     Date filed: {meta.get('date_filed', 'Unknown')}")
-                            console.print(f"     Content: {len(doc.get('content', ''))} chars")
-                            console.print(f"     Type: {meta.get('document_type', 'Unknown')}")
-                    
-                    # Show errors if any
-                    if results['errors']:
-                        console.print(f"\n[yellow]⚠️ Errors encountered:[/yellow]")
-                        for error in results['errors'][:5]:
-                            console.print(f"  - {error}")
-                    
-                except Exception as e:
-                    console.print(f"[red]Error: {str(e)}[/red]")
-                    import traceback
-                    console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                
+                # Document statistics
+                console.print(f"\n[bold]Document Statistics:[/bold]")
+                console.print(f"  Total fetched: {stats['total_fetched']}")
+                console.print(f"  New documents: {stats['new_documents']}")
+                console.print(f"  Duplicates: {stats['duplicates']}")
+                console.print(f"  With content: {stats['with_content']}")
+                console.print(f"  With judges: {stats['with_judges']}")
+                
+                # Calculate rates
+                if stats['new_documents'] > 0:
+                    content_rate = (stats['with_content'] / stats['new_documents']) * 100
+                    judge_rate = (stats['with_judges'] / stats['new_documents']) * 100
+                    console.print(f"\n[bold]Attribution Rates:[/bold]")
+                    console.print(f"  Content extraction: {content_rate:.1f}%")
+                    console.print(f"  Judge attribution: {judge_rate:.1f}%")
+                
+                # Enhancement statistics
+                if enhance:
+                    console.print(f"\n[bold]Enhancement Statistics:[/bold]")
+                    console.print(f"  Pipeline enhanced: {stats['pipeline_enhanced']}")
+                
+                if extract_pdfs and stats['pdf_extracted'] > 0:
+                    console.print(f"  PDF extractions: {stats['pdf_extracted']}")
+                
+                if store:
+                    console.print(f"  Stored to database: {stats['stored_to_db']}")
+                
+                # Performance metrics
+                console.print(f"\n[bold]Performance Metrics:[/bold]")
+                console.print(f"  Fetch time: {perf['fetch_time']:.2f}s")
+                if enhance:
+                    console.print(f"  Pipeline time: {perf['pipeline_time']:.2f}s")
+                if store:
+                    console.print(f"  Storage time: {perf['storage_time']:.2f}s")
+                console.print(f"  Total time: {perf['total_time']:.2f}s")
+                
+                # Show sample documents
+                if results['documents']:
+                    console.print(f"\n[bold]Sample Documents:[/bold]")
+                    for i, doc in enumerate(results['documents'][:3], 1):
+                        meta = doc.get('meta', {})
+                        console.print(f"\n  {i}. {meta.get('case_name', 'Unknown Case')}")
+                        console.print(f"     Court: {meta.get('court', 'Unknown')}")
+                        console.print(f"     Judge: {meta.get('judge_name', 'Unknown')} (confidence: {meta.get('judge_confidence', 0):.2f})")
+                        console.print(f"     Date filed: {meta.get('date_filed', 'Unknown')}")
+                        console.print(f"     Content: {len(doc.get('content', ''))} chars")
+                        console.print(f"     Type: {meta.get('document_type', 'Unknown')}")
+                
+                # Show errors if any
+                if results['errors']:
+                    console.print(f"\n[yellow]⚠️ Errors encountered:[/yellow]")
+                    for error in results['errors'][:5]:
+                        console.print(f"  - {error}")
+                
+            except Exception as e:
+                console.print(f"[red]Error: {str(e)}[/red]")
+                import traceback
+                console.print(f"[dim]{traceback.format_exc()}[/dim]")
     
     asyncio.run(run_collection())
 
@@ -931,26 +931,26 @@ def judge(judge_name, court, years, limit):
         if not RICH_AVAILABLE:
             console.print("Rich library not available. Using simple output.")
             service = DocumentIngestionService()
-                results = await service.collect_documents(
-                    court_id=court,
-                    judge_name=judge_name,
-                    date_after=date_after,
-                    date_before=date_before,
-                    max_documents=limit,
-                    run_pipeline=False,
-                    extract_pdfs=True,
-                    store_to_db=True
-                )
-                
-                if results['success']:
-                    console.print(f"\n✅ Collection Complete")
-                    console.print(f"  Documents collected: {len(results['documents'])}")
-                    console.print(f"  With content: {results['statistics']['with_content']}")
-                    console.print(f"  With judges: {results['statistics']['with_judges']}")
-                else:
-                    console.print(f"\n❌ Collection Failed")
-                    for error in results.get('errors', []):
-                        console.print(f"  Error: {error}")
+            results = await service.collect_documents(
+                court_id=court,
+                judge_name=judge_name,
+                date_after=date_after,
+                date_before=date_before,
+                max_documents=limit,
+                run_pipeline=False,
+                extract_pdfs=True,
+                store_to_db=True
+            )
+            
+            if results['success']:
+                console.print(f"\n✅ Collection Complete")
+                console.print(f"  Documents collected: {len(results['documents'])}")
+                console.print(f"  With content: {results['statistics']['with_content']}")
+                console.print(f"  With judges: {results['statistics']['with_judges']}")
+            else:
+                console.print(f"\n❌ Collection Failed")
+                for error in results.get('errors', []):
+                    console.print(f"  Error: {error}")
         else:
             # Use Progress with proper imports at function level
             from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn

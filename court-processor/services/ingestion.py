@@ -105,30 +105,18 @@ class DocumentIngestionService:
         try:
             all_documents = []
             
-            # Enhanced judge-specific collection (NEW)
-            if judge_name and 'opinions' in document_types:
-                logger.info(f"Using enhanced search for judge: {judge_name}")
-                judge_documents = await self._fetch_enhanced_judge_documents(
-                    judge_name, court_ids, date_after, max_per_court
-                )
-                all_documents.extend(judge_documents)
-                self.stats['sources']['courtlistener_enhanced'] += len(judge_documents)
-            # Use enhanced search if nature_of_suit provided for IP cases
-            elif nature_of_suit and search_type:
-                logger.info(f"Using enhanced search for IP cases with nature_of_suit: {nature_of_suit}")
-                ip_documents = await self._fetch_ip_focused_documents(
-                    court_ids, date_after, nature_of_suit, search_type, max_per_court
-                )
-                all_documents.extend(ip_documents)
-                self.stats['sources']['courtlistener_opinions'] += len(ip_documents)
-            # Otherwise use standard opinions endpoint
-            elif 'opinions' in document_types:
-                logger.info("Fetching opinions from CourtListener...")
-                opinions = await self._fetch_and_process_opinions(
-                    court_ids, date_after, max_per_court
+            # Unified opinion collection with intelligent routing
+            if 'opinions' in document_types:
+                opinions = await self._fetch_documents(
+                    document_type='opinions',
+                    court_ids=court_ids,
+                    date_after=date_after,
+                    max_per_court=max_per_court,
+                    judge_name=judge_name,
+                    nature_of_suit=nature_of_suit,
+                    search_type=search_type
                 )
                 all_documents.extend(opinions)
-                self.stats['sources']['courtlistener_opinions'] += len(opinions)
             
             # Fetch RECAP documents if requested
             if 'recap' in document_types:
@@ -157,6 +145,69 @@ class DocumentIngestionService:
         
         results['statistics'] = self.get_statistics()
         return results
+    
+    def _determine_collection_strategy(self,
+                                     judge_name: Optional[str] = None,
+                                     nature_of_suit: Optional[List[str]] = None,
+                                     search_type: Optional[str] = None) -> str:
+        """
+        Determine the optimal collection strategy based on parameters
+        
+        Returns:
+            'enhanced_judge': Enhanced search with judge-specific collection
+            'enhanced_ip': Enhanced search for IP-focused cases
+            'standard': Standard bulk collection via opinions endpoint
+        """
+        if judge_name:
+            # Enhanced judge collection provides best metadata/content quality
+            logger.info(f"Strategy: Enhanced judge collection for {judge_name}")
+            return 'enhanced_judge'
+        elif nature_of_suit and search_type:
+            # Enhanced IP collection for specialized patent/IP case analysis
+            logger.info(f"Strategy: Enhanced IP collection for {nature_of_suit}")
+            return 'enhanced_ip'
+        else:
+            # Standard collection for broad coverage and efficiency
+            logger.info("Strategy: Standard bulk collection")
+            return 'standard'
+    
+    async def _fetch_documents(self,
+                             document_type: str,
+                             court_ids: List[str],
+                             date_after: str,
+                             max_per_court: int,
+                             judge_name: Optional[str] = None,
+                             nature_of_suit: Optional[List[str]] = None,
+                             search_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Unified document collection with intelligent routing
+        
+        Automatically selects the optimal collection strategy based on parameters:
+        - Enhanced judge collection: Best for judge-specific research (rich metadata, 100% attribution)
+        - Enhanced IP collection: Best for patent/IP case analysis (specialized filters)
+        - Standard collection: Best for broad coverage and efficiency (fast, bulk access)
+        """
+        strategy = self._determine_collection_strategy(judge_name, nature_of_suit, search_type)
+        
+        if strategy == 'enhanced_judge':
+            documents = await self._fetch_enhanced_judge_documents(
+                judge_name, court_ids, date_after, max_per_court
+            )
+            self.stats['sources']['courtlistener_enhanced'] += len(documents)
+            
+        elif strategy == 'enhanced_ip':
+            documents = await self._fetch_ip_focused_documents(
+                court_ids, date_after, nature_of_suit, search_type, max_per_court
+            )
+            self.stats['sources']['courtlistener_opinions'] += len(documents)
+            
+        else:  # standard
+            documents = await self._fetch_and_process_opinions(
+                court_ids, date_after, max_per_court
+            )
+            self.stats['sources']['courtlistener_opinions'] += len(documents)
+        
+        return documents
     
     async def _fetch_and_process_opinions(self,
                                         court_ids: List[str],

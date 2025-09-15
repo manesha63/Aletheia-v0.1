@@ -142,7 +142,7 @@ services:
     environment:
       # Use individual DB variables to avoid password escaping issues
       PYTHONPATH: /app
-      COURTLISTENER_API_TOKEN: ${COURTLISTENER_API_TOKEN}
+      COURTLISTENER_API_KEY: ${COURTLISTENER_API_KEY}
       PACER_USERNAME: ${PACER_USERNAME}
       PACER_PASSWORD: ${PACER_PASSWORD}
       RECAP_WEBHOOK_URL: http://recap-webhook:5000/webhook/recap-fetch
@@ -183,7 +183,7 @@ services:
   #     context: ./court-processor/api
   #     dockerfile: Dockerfile
   #   environment:
-  #     COURTLISTENER_API_TOKEN: ${COURTLISTENER_API_TOKEN}
+  #     COURTLISTENER_API_KEY: ${COURTLISTENER_API_KEY}
   #     RECAP_DOWNLOAD_DIR: /data/recap_downloads
   #     RECAP_WEBHOOK_SECRET: ${RECAP_WEBHOOK_SECRET}
   #     FLASK_ENV: production

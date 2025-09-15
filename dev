@@ -82,6 +82,7 @@ source "$SCRIPT_DIR/dev-modules/dev-reconcile.sh"
 source "$SCRIPT_DIR/dev-modules/dev-audit.sh"
 source "$SCRIPT_DIR/dev-modules/dev-deps.sh"
 source "$SCRIPT_DIR/dev-modules/dev-check.sh"
+source "$SCRIPT_DIR/dev-modules/dev-court.sh"
 
 # ============================================================================
 # Main Command Router
@@ -180,6 +181,11 @@ case "$1" in
     # n8n Commands
     n8n)
         handle_n8n_command "$2" "${@:3}"
+        ;;
+        
+    # Court Processor Commands
+    court)
+        handle_court_command "$2" "${@:3}"
         ;;
         
     # System Intelligence Commands  

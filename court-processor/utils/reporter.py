@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
-from pipeline_exceptions import PipelineError
+from exceptions import PipelineError
 
 
 class ErrorCollector:

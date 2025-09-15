@@ -12,8 +12,17 @@ def get_db_connection(cursor_factory=None):
     """
     Get database connection using environment variable or defaults
     """
-    # Get DATABASE_URL from environment or use default for local development
-    database_url = os.getenv('DATABASE_URL', 'postgresql://aletheia:aletheia123@localhost:5432/aletheia')
+    # Get DATABASE_URL from environment or construct from individual variables
+    database_url = os.getenv('DATABASE_URL')
+    
+    if not database_url:
+        # Construct from individual environment variables (Docker setup)
+        db_host = os.getenv('DB_HOST', 'localhost')
+        db_port = os.getenv('DB_PORT', '5432')
+        db_name = os.getenv('DB_NAME', 'aletheia')
+        db_user = os.getenv('DB_USER', 'aletheia')
+        db_password = os.getenv('DB_PASSWORD', 'aletheia123')
+        database_url = f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
     
     try:
         if cursor_factory:
@@ -27,9 +36,18 @@ def get_db_connection(cursor_factory=None):
 
 def get_db_config():
     """
-    Parse database configuration from DATABASE_URL
+    Parse database configuration from DATABASE_URL or individual environment variables
     """
-    database_url = os.getenv('DATABASE_URL', 'postgresql://aletheia:aletheia123@db:5432/aletheia')
+    database_url = os.getenv('DATABASE_URL')
+    
+    if not database_url:
+        # Construct from individual environment variables (Docker setup)
+        db_host = os.getenv('DB_HOST', 'db')
+        db_port = os.getenv('DB_PORT', '5432')
+        db_name = os.getenv('DB_NAME', 'aletheia')
+        db_user = os.getenv('DB_USER', 'aletheia')
+        db_password = os.getenv('DB_PASSWORD', 'aletheia123')
+        database_url = f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
     
     # Parse the URL
     import re

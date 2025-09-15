@@ -111,7 +111,7 @@ Environment variables (set in parent `.env`):
 ```bash
 DATABASE_URL=postgresql://user:pass@db:5432/aletheia
 COURT_PROCESSOR_PORT=8104
-COURTLISTENER_API_TOKEN=your-token  # For data collection
+COURTLISTENER_API_KEY=your-token  # For data collection
 ```
 
 ## Architecture

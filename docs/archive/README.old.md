@@ -32,7 +32,7 @@ cd Aletheia-v0.1
 cp .env.example .env
 # Note: Default values in .env work for local development
 # Add API keys for optional features:
-# - COURTLISTENER_API_TOKEN for court data import
+# - COURTLISTENER_API_KEY for court data import
 # - NEXTAUTH_SECRET for production deployments
 ```
 
@@ -1463,7 +1463,7 @@ docker exec aletheia-n8n-1 tar czf - -C /home/node/.n8n . > n8n_backup_$(date +%
 pip install -r court-processor/courtlistener_integration/requirements.txt
 
 # Add API key to .env
-echo "COURTLISTENER_API_TOKEN=your_api_key_here" >> .env
+echo "COURTLISTENER_API_KEY=your_api_key_here" >> .env
 ```
 
 ### Quick Start Import

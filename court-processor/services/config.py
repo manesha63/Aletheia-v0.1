@@ -13,7 +13,7 @@ DATABASE_HOST = "db"
 DATABASE_URL = os.getenv('DATABASE_URL', f'postgresql://aletheia:aletheia123@{DATABASE_HOST}:5432/aletheia')
 
 # API Keys
-COURTLISTENER_API_TOKEN = os.getenv('COURTLISTENER_API_TOKEN', '')
+COURTLISTENER_API_KEY = os.getenv('COURTLISTENER_API_KEY', '')
 FLP_API_KEY = os.getenv('FLP_API_KEY', '')
 
 # Service endpoints

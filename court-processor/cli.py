@@ -782,64 +782,58 @@ def court(court_id, years, date_after, date_before, judge, limit, enhance, extra
     
     async def run_collection():
         # Import unified collection service
-        from services.unified_collection_service import UnifiedCollectionService
+        from services.ingestion import DocumentIngestionService
         
         # Import Progress components locally if not available globally
         if not RICH_AVAILABLE:
             console.print("[yellow]Rich library not available. Using simple output.[/yellow]")
             # Simple version without progress bar
-            async with UnifiedCollectionService() as service:
-                results = await service.collect_documents(
-                    court_id=court_id,
-                    judge_name=judge,
-                    date_after=date_after,
-                    date_before=date_before,
-                    max_documents=limit,
-                    run_pipeline=enhance,
-                    extract_pdfs=extract_pdfs,
-                    store_to_db=store
-                )
-                # Display results (simplified)
-                stats = results['statistics']
-                console.print(f"\n✅ Collection Complete")
-                console.print(f"  Documents collected: {stats['new_documents']}")
+            service = DocumentIngestionService()
+            results = await service.ingest_from_courtlistener(
+                court_ids=[court_id],
+                date_after=date_after or '2020-01-01',
+                document_types=['opinions'],
+                max_per_court=limit
+            )
+            # Display results (simplified)
+            stats = results.get('statistics', results)
+            console.print(f"\n✅ Collection Complete")
+            console.print(f"  Documents collected: {stats.get('documents_ingested', 0)}")
+            if stats.get('with_content'):
                 console.print(f"  With content: {stats['with_content']}")
+            if stats.get('with_judges'):
                 console.print(f"  With judges: {stats['with_judges']}")
             return
         
         from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
         
-        async with UnifiedCollectionService() as service:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("{task.completed}/{task.total}"),
-                TimeElapsedColumn(),
-                console=console
-            ) as progress:
+        service = DocumentIngestionService()
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            console=console
+        ) as progress:
+            
+            task = progress.add_task(f"Collecting from {court_id}...", total=limit)
+            
+            try:
+                results = await service.ingest_from_courtlistener(
+                    court_ids=[court_id],
+                    date_after=date_after or '2020-01-01',
+                    document_types=['opinions'],
+                    max_per_court=limit
+                )
                 
-                task = progress.add_task(f"Collecting from {court_id}...", total=limit)
+                progress.update(task, completed=limit)
                 
-                try:
-                    results = await service.collect_documents(
-                        court_id=court_id,
-                        judge_name=judge,
-                        date_after=date_after,
-                        date_before=date_before,
-                        max_documents=limit,
-                        run_pipeline=enhance,
-                        extract_pdfs=extract_pdfs,
-                        store_to_db=store
-                    )
-                    
-                    progress.update(task, completed=limit)
-                    
-                    # Display comprehensive results
-                    stats = results['statistics']
-                    perf = results['performance']
-                    
-                    console.print(f"\n[green]✅ Collection Complete[/green]")
+                # Display comprehensive results
+                stats = results.get('statistics', results)
+                perf = results.get('performance', {})
+                
+                console.print(f"\n[green]✅ Collection Complete[/green]")
                     
                     # Document statistics
                     console.print(f"\n[bold]Document Statistics:[/bold]")
@@ -929,14 +923,14 @@ def judge(judge_name, court, years, limit):
     
     async def run_collection():
         # Use unified collection service for consistency and better retrieval
-        from services.unified_collection_service import UnifiedCollectionService
+        from services.ingestion import DocumentIngestionService
         
         console.print(f"[dim]Using enhanced retrieval with content extraction[/dim]\n")
         
         # Check if rich is available for progress bar
         if not RICH_AVAILABLE:
             console.print("Rich library not available. Using simple output.")
-            async with UnifiedCollectionService() as service:
+            service = DocumentIngestionService()
                 results = await service.collect_documents(
                     court_id=court,
                     judge_name=judge_name,
@@ -973,7 +967,7 @@ def judge(judge_name, court, years, limit):
                 task = progress.add_task(f"Collecting {judge_name} documents...", total=limit)
                 
                 try:
-                    async with UnifiedCollectionService() as service:
+                    service = DocumentIngestionService()
                         results = await service.collect_documents(
                             court_id=court,
                             judge_name=judge_name,

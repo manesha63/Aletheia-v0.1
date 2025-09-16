@@ -43,7 +43,7 @@ show_help() {
     echo "  db shell        Open PostgreSQL shell"
     echo "  db schema       Show database schema"
     echo "  db backup       Create timestamped database backup"
-    echo "  db backup --update-baseline  Update git-stored court documents backup"
+    echo "  db backup -b    Update git-stored court documents backup"
     echo "  archive         Move old files to .archive/"
     echo ""
     echo -e "${CYAN}⚙️ Configuration:${NC}"

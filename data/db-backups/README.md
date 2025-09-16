@@ -47,6 +47,8 @@ psql -h localhost -p 8200 -U aletheia -d aletheia -f court_documents_complete.sq
 ### Using Dev CLI (Recommended)
 
 ```bash
+./dev db backup -b
+# or
 ./dev db backup --update-baseline
 ```
 

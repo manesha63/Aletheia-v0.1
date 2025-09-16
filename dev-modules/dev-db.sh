@@ -34,7 +34,7 @@ handle_db_command() {
                 echo "  schema [--detailed]     - Show database schema"
                 echo "  shell                  - Open PostgreSQL shell"
                 echo "  backup                 - Create timestamped database backup"
-                echo "  backup --update-baseline - Update compressed court documents backup for git"
+                echo "  backup -b|--update-baseline - Update compressed court documents backup for git"
                 echo "  restore <file>         - Restore from backup"
                 echo "  restore-court-data     - Restore court processor sample data"
             fi
@@ -99,8 +99,8 @@ db_shell() {
 db_backup() {
     check_requirements
 
-    # Check for --update-baseline flag
-    if [ "$1" = "--update-baseline" ]; then
+    # Check for --update-baseline or -b flag
+    if [ "$1" = "--update-baseline" ] || [ "$1" = "-b" ]; then
         db_backup_update_baseline
         return $?
     fi

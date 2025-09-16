@@ -51,6 +51,8 @@ This ensures new users immediately have sample data available.
 ### Using Dev CLI (Recommended)
 
 ```bash
+./dev db backup -b
+# or
 ./dev db backup --update-baseline
 ```
 

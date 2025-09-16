@@ -1,14 +1,15 @@
 # Court Processor Sample Data
 
-This directory contains a backup of 485 court documents for development and testing.
+This directory contains a backup of 637 court documents for development and testing.
 
 ## Contents
 
-- **court_documents_backup.sql.gz** - Compressed SQL backup (3.1MB compressed, 11MB uncompressed)
-  - 485 court documents from public.court_documents table
-  - Document types: opinion (273), 020lead (210), opinion_doctor (2)
-  - Date range: 1996-05-02 to 2025-07-22
-  - Largest document: 119,432 characters
+- **court_documents_backup.sql.gz** - Compressed SQL backup (3.9MB compressed, 15MB uncompressed)
+  - 637 court documents from public.court_documents table
+  - 72 XML-enhanced documents with structured legal metadata
+  - Document types: opinion, 020lead, opinion_doctor, published_opinion
+  - Date range: 1996-05-02 to 2025-09-16
+  - Enhanced features: citations, judge attribution, legal motions, federal rules
 
 ## Restoration
 
@@ -32,10 +33,11 @@ gunzip -c court-processor/data/court_documents_backup.sql.gz | \
 
 ## Data Statistics
 
-- **Total Size**: ~9.5MB of text content
-- **Average Document**: ~20KB
-- **Documents > 50K chars**: 19
-- **Top Courts**: txed (72), ded (44), mdd (16)
+- **Total Size**: ~15MB of text content
+- **Average Document**: ~24KB
+- **XML-Enhanced Docs**: 72 with structured metadata
+- **Citation-Rich Docs**: 6 documents with 30+ citations
+- **Top Courts**: cand (82), txed (72), ded (44)
 
 ## Integration with Setup
 

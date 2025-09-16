@@ -25,43 +25,86 @@ let globalCircuitBreaker: CircuitBreaker | null = null;
 // Global rate limiter instance (shared across all executions)
 let globalRateLimiter: RateLimiter | null = null;
 
-// Document section structure for pre-chunked input
-interface DocumentSection {
-  id: string;                    // Unique section identifier
-  type: 'transcript' | 'opinion' | 'document'; // Document type
-  sequence: number;               // Chronological order
+// NEW CLEAN INTERFACES
+
+// Input document from webhook
+interface DocumentInput {
+  id: string;
+  type: 'opinion' | 'transcript';
+  content: string;
   metadata: {
-    speaker?: string;             // For transcripts
-    action?: string;              // objection, testimony, cross, recross, etc.
-    timestamp?: string;           // When in proceeding
-    page?: number;                // Page reference
-    line?: number;                // Line reference
-    [key: string]: any;           // Extensible metadata
-  };
-  content: string;                // Actual text content
-  context?: {                     // Optional linking context
-    previousSectionId?: string;
-    relatedSections?: string[];
+    parties?: string[];
+    code?: string;
+    court?: string;
+    date?: string;
+    [key: string]: any;
   };
 }
 
-// Processing strategy configuration
-interface ProcessingStrategy {
-  documentType: 'transcript' | 'opinion' | 'document';
-  summarization: {
-    sectionPrompt: string;        // Per-section summary prompt
-    groupPrompt?: string;          // Group-level summary prompt
-    patternPrompt?: string;        // Pattern analysis prompt
-    finalPrompt: string;           // Final synthesis prompt
+// AI-generated tags with specialized format
+interface AITag {
+  type: 'status' | 'outcome' | 'legal_standard' | 'parties' | 'custom';
+  value: string;
+  confidence?: number;
+  source_reference: string;
+  raw_tag: string; // Original <**type:value**> format
+}
+
+// First-level summary with tags
+interface TaggedSummary {
+  id: string;
+  document_id: string;
+  batch_index: number;
+  summary_text: string;
+  ai_tags: AITag[];
+  token_count: number;
+  source_content: string;
+}
+
+// Elasticsearch grouping configuration
+interface GroupingPattern {
+  name: string;
+  description: string;
+  query: any;
+  aggregation: any;
+}
+
+// Group summary result
+interface GroupSummary {
+  group_key: string;
+  group_type: string;
+  summary: string;
+  source_document_ids: string[];
+  member_count: number;
+  ai_tags: AITag[];
+}
+
+// Processing configuration (simplified)
+interface ProcessingConfig {
+  documentType: 'opinion' | 'transcript';
+  batchId: string;
+  resilience?: ResilienceConfig;
+  prompts: {
+    summaryPrompt: string;
+    taggingPrompt: string;
+    secondLevelPrompt: string;
   };
-  grouping?: {
-    enabled: boolean;
-    groupBy: string[];             // Metadata fields to group by
-    groupOrder?: string[];         // Processing order for groups
+}
+
+// Output format for processed documents
+interface ProcessedDocument {
+  original_document: DocumentInput;
+  first_level_summaries: TaggedSummary[];
+  grouped_analysis: {
+    by_status?: GroupSummary[];
+    by_parties?: GroupSummary[];
+    by_code_outcome?: GroupSummary[];
   };
-  context: {
-    includesPrevious: boolean;     // Include previous summaries
-    maxContextTokens?: number;     // Limit context size
+  metadata: {
+    processing_time: number;
+    total_summaries: number;
+    total_groups: number;
+    ai_tags_generated: number;
   };
 }
 

@@ -31,11 +31,12 @@ handle_db_command() {
                 echo '{"status":"error","message":"Unknown database command"}'
             else
                 echo "Usage: ./dev db [schema|shell|backup|restore|restore-court-data]"
-                echo "  schema [--detailed]  - Show database schema"
-                echo "  shell               - Open PostgreSQL shell"
-                echo "  backup              - Create database backup"
-                echo "  restore <file>      - Restore from backup"
-                echo "  restore-court-data  - Restore court processor sample data"
+                echo "  schema [--detailed]     - Show database schema"
+                echo "  shell                  - Open PostgreSQL shell"
+                echo "  backup                 - Create timestamped database backup"
+                echo "  backup --update-baseline - Update compressed court documents backup for git"
+                echo "  restore <file>         - Restore from backup"
+                echo "  restore-court-data     - Restore court processor sample data"
             fi
             return $EXIT_CONFIG_ERROR
             ;;
@@ -97,11 +98,17 @@ db_shell() {
 # Create database backup
 db_backup() {
     check_requirements
-    
+
+    # Check for --update-baseline flag
+    if [ "$1" = "--update-baseline" ]; then
+        db_backup_update_baseline
+        return $?
+    fi
+
     timestamp=$(date +%Y%m%d_%H%M%S)
     backup_dir="backups"
     mkdir -p "$backup_dir"
-    
+
     if [ "$OUTPUT_FORMAT" = "json" ]; then
         if $DOCKER_COMPOSE exec -T db pg_dump -U "${DB_USER:-aletheia}" "${DB_NAME:-aletheia}" > "$backup_dir/db_backup_${timestamp}.sql" 2>/dev/null; then
             size=$(du -h "$backup_dir/db_backup_${timestamp}.sql" | cut -f1)
@@ -121,6 +128,108 @@ db_backup() {
             return $EXIT_RESOURCE_ERROR
         fi
     fi
+}
+
+# Update baseline compressed backups for git storage
+db_backup_update_baseline() {
+    echo -e "${BLUE}Updating baseline court documents backup...${NC}"
+
+    # Check if database is running
+    if ! check_service_running "db" true; then
+        echo -e "${RED}✗${NC} Database service is not running"
+        echo "Start with: ./dev up"
+        return $EXIT_SERVICE_UNAVAILABLE
+    fi
+
+    # Check if court_documents table has data
+    local count=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c "SELECT COUNT(*) FROM public.court_documents;" 2>/dev/null | tr -d ' ')
+
+    if [ -z "$count" ] || [ "$count" = "0" ]; then
+        echo -e "${RED}✗${NC} No court documents found in database"
+        echo "Collect some data first with: ./dev court collect ..."
+        return $EXIT_RESOURCE_ERROR
+    fi
+
+    echo -e "${GREEN}✓${NC} Found $count court documents in database"
+
+    # Create temporary export directory
+    local temp_dir="tmp_baseline_backup_$$"
+    mkdir -p "$temp_dir"
+
+    echo "Exporting court documents table..."
+
+    # Export using the original method from README files
+    if $DOCKER_COMPOSE exec -T db pg_dump \
+        -U "${DB_USER:-aletheia}" \
+        -d "${DB_NAME:-aletheia}" \
+        -t public.court_documents \
+        --data-only \
+        --inserts \
+        --disable-triggers \
+        > "$temp_dir/court_documents_new.sql" 2>/dev/null; then
+
+        echo -e "${GREEN}✓${NC} Export completed"
+
+        # Get file size
+        local size=$(du -h "$temp_dir/court_documents_new.sql" | cut -f1)
+        echo "  Uncompressed size: $size"
+
+        # Compress the backup (using -9 for maximum compression like original)
+        echo "Compressing backup..."
+        if gzip -9 "$temp_dir/court_documents_new.sql"; then
+            echo -e "${GREEN}✓${NC} Compression completed"
+
+            local compressed_size=$(du -h "$temp_dir/court_documents_new.sql.gz" | cut -f1)
+            echo "  Compressed size: $compressed_size"
+
+            # Update both backup locations (maintaining dual-location strategy)
+            echo "Updating baseline backup files..."
+
+            # Update primary backup location
+            if [ -f "data/db-backups/court_documents_complete.sql.gz" ]; then
+                cp "$temp_dir/court_documents_new.sql.gz" "data/db-backups/court_documents_complete.sql.gz"
+                echo -e "${GREEN}✓${NC} Updated data/db-backups/court_documents_complete.sql.gz"
+            fi
+
+            # Update court-processor backup location
+            if [ -f "court-processor/data/court_documents_backup.sql.gz" ]; then
+                cp "$temp_dir/court_documents_new.sql.gz" "court-processor/data/court_documents_backup.sql.gz"
+                echo -e "${GREEN}✓${NC} Updated court-processor/data/court_documents_backup.sql.gz"
+            fi
+
+            # Get XML enhancement statistics
+            local xml_count=$($DOCKER_COMPOSE exec -T db psql -U "${DB_USER:-aletheia}" -d "${DB_NAME:-aletheia}" -t -c "SELECT COUNT(*) FROM public.court_documents WHERE metadata->>'xml_parsing_enabled' = 'true';" 2>/dev/null | tr -d ' ')
+
+            echo -e "${GREEN}✓${NC} Baseline backup update completed successfully!"
+            echo ""
+            echo "Updated Statistics:"
+            echo "  Total documents: $count"
+            echo "  XML-enhanced: $xml_count"
+            echo "  Compressed size: $compressed_size"
+            echo ""
+            echo "Updated backup files:"
+            echo "  - data/db-backups/court_documents_complete.sql.gz"
+            echo "  - court-processor/data/court_documents_backup.sql.gz"
+            echo ""
+            echo -e "${YELLOW}Next steps:${NC}"
+            echo "  1. Update README documentation if document count changed significantly"
+            echo "  2. Commit updated backups to git:"
+            echo "     git add data/db-backups/ court-processor/data/"
+            echo "     git commit -m 'update: refresh baseline court documents backup with enhanced XML data'"
+
+        else
+            echo -e "${RED}✗${NC} Compression failed"
+            rm -rf "$temp_dir"
+            return $EXIT_RESOURCE_ERROR
+        fi
+    else
+        echo -e "${RED}✗${NC} Export failed"
+        rm -rf "$temp_dir"
+        return $EXIT_RESOURCE_ERROR
+    fi
+
+    # Cleanup
+    rm -rf "$temp_dir"
 }
 
 # Restore database from backup
@@ -273,5 +382,6 @@ export -f handle_db_command
 export -f db_schema
 export -f db_shell
 export -f db_backup
+export -f db_backup_update_baseline
 export -f db_restore
 export -f db_restore_court_data

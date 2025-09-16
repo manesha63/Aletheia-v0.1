@@ -48,7 +48,19 @@ This ensures new users immediately have sample data available.
 
 ## Creating a New Backup
 
-To update this backup with current database content:
+### Using Dev CLI (Recommended)
+
+```bash
+./dev db backup --update-baseline
+```
+
+This command will:
+- Export current court documents from the database
+- Update both backup files (this location and data/db-backups/)
+- Maintain the same compression and format as the original
+- Show XML enhancement statistics and file sizes
+
+### Manual Method (Alternative)
 
 ```bash
 # Export current data

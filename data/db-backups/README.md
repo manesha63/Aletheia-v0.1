@@ -44,7 +44,20 @@ psql -h localhost -p 8200 -U aletheia -d aletheia -f court_documents_complete.sq
 
 ## Creating a Fresh Backup
 
-To create a new backup from the running database:
+### Using Dev CLI (Recommended)
+
+```bash
+./dev db backup --update-baseline
+```
+
+This command will:
+- Export current court documents from the database
+- Compress using maximum compression (gzip -9)
+- Update both backup files (data/db-backups/ and court-processor/data/)
+- Show statistics including XML-enhanced document count
+- Provide guidance for committing updated backups
+
+### Manual Method (Alternative)
 
 ```bash
 # Export data

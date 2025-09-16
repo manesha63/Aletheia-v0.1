@@ -1108,6 +1108,121 @@ class DocumentIngestionService:
 
         return metadata
 
+    async def retroactive_xml_parsing(self,
+                                     batch_size: int = 50,
+                                     dry_run: bool = True) -> Dict[str, Any]:
+        """
+        Apply XML parsing to existing enhanced collection documents
+
+        Processes documents that have XML content but haven't been parsed yet,
+        updating their metadata with extracted structured information.
+
+        Args:
+            batch_size: Number of documents to process per batch
+            dry_run: If True, reports what would be done without making changes
+
+        Returns:
+            Statistics about the parsing operation
+        """
+        from .database import get_db_connection
+
+        stats = {
+            'candidates_found': 0,
+            'successfully_parsed': 0,
+            'parsing_errors': 0,
+            'database_errors': 0,
+            'total_metadata_fields': 0,
+            'sources_processed': {},
+            'dry_run': dry_run
+        }
+
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+
+                # Find XML documents without parsing
+                find_query = """
+                    SELECT id, case_number, content, metadata
+                    FROM court_documents
+                    WHERE content LIKE '<opinion%'
+                      AND (metadata IS NULL OR NOT metadata ? 'xml_parsing_enabled')
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                """
+
+                cur.execute(find_query, (batch_size,))
+                candidates = cur.fetchall()
+                stats['candidates_found'] = len(candidates)
+
+                if not candidates:
+                    logger.info("No XML parsing candidates found")
+                    return stats
+
+                logger.info(f"Found {len(candidates)} documents for XML parsing")
+
+                for i, row in enumerate(candidates):
+                    try:
+                        if len(row) != 4:
+                            logger.error(f"Row {i} has unexpected length {len(row)}: {row}")
+                            continue
+                        doc_id, case_number, content, metadata_json = row[0], row[1], row[2], row[3]
+                    except Exception as e:
+                        logger.error(f"Error unpacking row {i}: {e}, row={row}")
+                        stats['database_errors'] += 1
+                        continue
+                    try:
+                        # Parse existing metadata (handle both dict and JSON string)
+                        import json
+                        if isinstance(metadata_json, dict):
+                            metadata = metadata_json
+                        else:
+                            metadata = json.loads(metadata_json) if metadata_json else {}
+                        source = metadata.get('source', 'unknown')
+
+                        # Track sources
+                        if source not in stats['sources_processed']:
+                            stats['sources_processed'][source] = 0
+                        stats['sources_processed'][source] += 1
+
+                        # Apply XML parsing
+                        xml_metadata = self._parse_xml_content(content)
+
+                        if xml_metadata:
+                            # Merge XML metadata into existing metadata
+                            metadata.update(xml_metadata)
+                            stats['total_metadata_fields'] += len(xml_metadata)
+
+                            if not dry_run:
+                                # Update database with enhanced metadata
+                                update_query = """
+                                    UPDATE court_documents
+                                    SET metadata = %s, updated_at = NOW()
+                                    WHERE id = %s
+                                """
+                                cur.execute(update_query, (json.dumps(metadata), doc_id))
+
+                            stats['successfully_parsed'] += 1
+                            logger.debug(f"Enhanced document {doc_id} ({case_number}) with {len(xml_metadata)} XML fields")
+                        else:
+                            stats['parsing_errors'] += 1
+                            logger.warning(f"XML parsing failed for document {doc_id}")
+
+                    except Exception as e:
+                        stats['database_errors'] += 1
+                        logger.error(f"Error processing document {doc_id}: {e}")
+
+                if not dry_run:
+                    conn.commit()
+                    logger.info(f"Committed {stats['successfully_parsed']} XML parsing updates to database")
+                else:
+                    logger.info(f"DRY RUN: Would update {stats['successfully_parsed']} documents")
+
+        except Exception as e:
+            logger.error(f"Batch XML parsing failed: {e}")
+            stats['database_errors'] += 1
+
+        return stats
+
     def _determine_enhanced_document_type(self, cluster_data: Dict[str, Any]) -> str:
         """
         Determine document type based on cluster metadata

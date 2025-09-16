@@ -173,7 +173,7 @@ handle_court_collect_command() {
 handle_court_data_command() {
     local data_cmd="$1"
     shift
-    
+
     case "$data_cmd" in
         status)
             execute_court_cli "data status" "$@"
@@ -187,9 +187,15 @@ handle_court_data_command() {
         export)
             execute_court_cli "data export" "$@"
             ;;
+        xml-summary)
+            execute_court_cli "data xml-summary" "$@"
+            ;;
+        xml-extract)
+            execute_court_cli "data xml-extract" "$@"
+            ;;
         help|--help|-h|"")
             if [ "$OUTPUT_FORMAT" = "json" ]; then
-                echo '{"status":"info","commands":["status","fix","list","export"],"usage":"./dev court data <command> [options]"}'
+                echo '{"status":"info","commands":["status","fix","list","export","xml-summary","xml-extract"],"usage":"./dev court data <command> [options]"}'
             else
                 echo "Usage: ./dev court data <command>"
                 echo ""
@@ -198,12 +204,16 @@ handle_court_data_command() {
                 echo "  fix              Fix data quality issues"
                 echo "  list             List documents with filters"
                 echo "  export           Export documents with full content"
+                echo "  xml-summary      Show XML parsing coverage and quality"
+                echo "  xml-extract      Extract specific XML metadata fields"
                 echo ""
                 echo "Examples:"
                 echo "  ./dev court data status"
                 echo "  ./dev court data fix --judge-attribution --filter-court txed"
                 echo "  ./dev court data list --type opinion --court txed"
                 echo "  ./dev court data export --judge \"Gilstrap\" --full-content"
+                echo "  ./dev court data xml-summary"
+                echo "  ./dev court data xml-extract --field citations --court txed"
             fi
             ;;
         *)
@@ -222,24 +232,29 @@ handle_court_data_command() {
 handle_court_search_command() {
     local search_cmd="$1"
     shift
-    
+
     case "$search_cmd" in
         opinions)
             execute_court_cli "search opinions" "$@"
             ;;
+        enhanced)
+            execute_court_cli "search enhanced" "$@"
+            ;;
         help|--help|-h|"")
             if [ "$OUTPUT_FORMAT" = "json" ]; then
-                echo '{"status":"info","commands":["opinions"],"usage":"./dev court search opinions [query] [options]"}'
+                echo '{"status":"info","commands":["opinions","enhanced"],"usage":"./dev court search <command> [query] [options]"}'
             else
                 echo "Usage: ./dev court search <command>"
                 echo ""
                 echo "Available commands:"
                 echo "  opinions [query] Search through indexed opinions and documents"
+                echo "  enhanced [query] Search with XML-enhanced filtering and metadata"
                 echo ""
                 echo "Examples:"
                 echo "  ./dev court search opinions \"patent infringement\""
                 echo "  ./dev court search opinions --judge Gilstrap --court txed"
-                echo "  ./dev court search opinions --case-name \"Apple v Samsung\""
+                echo "  ./dev court search enhanced \"patent\" --xml-only --min-citations 5"
+                echo "  ./dev court search enhanced --has-motions --court txed --show-xml"
             fi
             ;;
         *)
@@ -371,16 +386,22 @@ court_help() {
         echo "Available commands:"
         echo "  analyze          Analyze judges, courts, and legal patterns"
         echo "  collect          Collect court documents from various sources"
-        echo "  data             Manage data quality and collection"
-        echo "  search           Search indexed court documents"
+        echo "  data             Manage data quality and XML-enhanced collection"
+        echo "  search           Search indexed court documents (basic & enhanced)"
         echo "  pipeline         Run document processing pipeline"
         echo "  status           Check court processor service status"
+        echo ""
+        echo "XML-Enhanced Features:"
+        echo "  ./dev court data xml-summary                    # Show XML parsing coverage"
+        echo "  ./dev court data xml-extract --field citations  # Extract citation data"
+        echo "  ./dev court search enhanced --xml-only           # Search XML documents only"
         echo ""
         echo "Examples:"
         echo "  ./dev court analyze judge \"Rodney Gilstrap\" --court txed"
         echo "  ./dev court collect court txed --years 2020-2025 --limit 100"
         echo "  ./dev court data status"
         echo "  ./dev court search opinions \"patent infringement\""
+        echo "  ./dev court search enhanced --min-citations 5 --show-xml"
         echo "  ./dev court pipeline run --limit 50 --unprocessed"
         echo ""
         echo "For command-specific help:"

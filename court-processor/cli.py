@@ -1164,6 +1164,314 @@ def list(doc_type, court, status, limit, offset, sort, export):
     conn.close()
 
 @data.command()
+def xml_summary():
+    """Show XML parsing coverage and quality metrics"""
+    console.print("\n[bold blue]📊 XML Parsing Quality Status[/bold blue]\n")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # XML parsing coverage
+    cur.execute("""
+        SELECT
+            COUNT(*) as total,
+            COUNT(CASE WHEN metadata->>'xml_parsing_enabled' = 'true' THEN 1 END) as xml_enabled,
+            COUNT(CASE WHEN metadata->>'xml_judge_full' IS NOT NULL THEN 1 END) as with_xml_judge,
+            COUNT(CASE WHEN metadata->>'xml_citation_count' IS NOT NULL THEN 1 END) as with_citations,
+            COUNT(CASE WHEN metadata->>'xml_legal_motions' IS NOT NULL THEN 1 END) as with_motions,
+            COUNT(CASE WHEN metadata->>'xml_federal_rules' IS NOT NULL THEN 1 END) as with_rules,
+            AVG(CASE WHEN metadata->>'xml_citation_count' IS NOT NULL
+                THEN (metadata->>'xml_citation_count')::int ELSE 0 END) as avg_citations
+        FROM public.court_documents
+        WHERE document_type IN ('opinion', 'opinion_doctor', '020lead')
+    """)
+
+    total, xml_enabled, with_xml_judge, with_citations, with_motions, with_rules, avg_citations = cur.fetchone()
+
+    if total == 0:
+        console.print("[yellow]No opinion documents in database[/yellow]")
+        cur.close()
+        conn.close()
+        return
+
+    # Calculate percentages
+    xml_pct = (xml_enabled / total * 100) if total > 0 else 0
+    judge_pct = (with_xml_judge / xml_enabled * 100) if xml_enabled > 0 else 0
+    citation_pct = (with_citations / xml_enabled * 100) if xml_enabled > 0 else 0
+    motion_pct = (with_motions / xml_enabled * 100) if xml_enabled > 0 else 0
+    rules_pct = (with_rules / xml_enabled * 100) if xml_enabled > 0 else 0
+
+    # Create status table
+    table = Table(title="XML Parsing Coverage", show_header=True)
+    table.add_column("Metric", style="cyan", width=25)
+    table.add_column("Coverage", justify="right", width=15)
+    table.add_column("Status", width=10)
+
+    def get_status(pct):
+        if pct >= 95: return "✅"
+        elif pct >= 50: return "⚠️"
+        else: return "❌"
+
+    table.add_row("Total Documents", f"{total:,}", "📄")
+    table.add_row("XML Parsing Enabled", f"{xml_enabled:,} ({xml_pct:.1f}%)", get_status(xml_pct))
+    table.add_row("Judge Attribution (XML)", f"{with_xml_judge:,} ({judge_pct:.1f}%)", get_status(judge_pct))
+    table.add_row("Citation Extraction", f"{with_citations:,} ({citation_pct:.1f}%)", get_status(citation_pct))
+    table.add_row("Legal Motions", f"{with_motions:,} ({motion_pct:.1f}%)", get_status(motion_pct))
+    table.add_row("Federal Rules", f"{with_rules:,} ({rules_pct:.1f}%)", get_status(rules_pct))
+
+    console.print(table)
+
+    # Quality insights
+    console.print(f"\n[cyan]Quality Insights:[/cyan]")
+    console.print(f"  • Average citations per document: {avg_citations:.1f}")
+
+    # Source breakdown
+    cur.execute("""
+        SELECT
+            metadata->>'source' as source,
+            COUNT(*) as count,
+            COUNT(CASE WHEN metadata->>'xml_parsing_enabled' = 'true' THEN 1 END) as xml_count
+        FROM public.court_documents
+        WHERE document_type IN ('opinion', 'opinion_doctor', '020lead')
+          AND metadata->>'source' IS NOT NULL
+        GROUP BY metadata->>'source'
+        ORDER BY xml_count DESC
+    """)
+
+    sources = cur.fetchall()
+    if sources:
+        console.print(f"\n[cyan]XML Parsing by Source:[/cyan]")
+        for source, count, xml_count in sources:
+            xml_rate = (xml_count / count * 100) if count > 0 else 0
+            console.print(f"  • {source}: {xml_count}/{count} ({xml_rate:.1f}%)")
+
+    cur.close()
+    conn.close()
+
+@data.command()
+@click.option('--field', type=click.Choice(['judge', 'citations', 'motions', 'rules', 'statutes', 'all']), default='all', help='XML field to extract')
+@click.option('--court', help='Filter by court ID')
+@click.option('--judge', help='Filter by judge name')
+@click.option('--limit', default=50, help='Number of documents to show')
+@click.option('--format', type=click.Choice(['table', 'json', 'csv']), default='table', help='Output format')
+def xml_extract(field, court, judge, limit, format):
+    """Extract specific XML metadata fields from documents
+
+    Examples:
+        court-processor data xml-extract --field citations --court txed
+        court-processor data xml-extract --field judge --format json
+    """
+    console.print(f"\n[bold blue]📋 XML Field Extraction: {field.upper()}[/bold blue]\n")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Build query based on field
+    if field == 'judge':
+        query = """
+            SELECT
+                id,
+                case_number,
+                metadata->>'case_name' as case_name,
+                metadata->>'judge_name' as standard_judge,
+                metadata->>'xml_judge_full' as xml_judge,
+                metadata->>'court_id' as court_id
+            FROM public.court_documents
+            WHERE metadata->>'xml_parsing_enabled' = 'true'
+              AND metadata->>'xml_judge_full' IS NOT NULL
+        """
+    elif field == 'citations':
+        query = """
+            SELECT
+                id,
+                case_number,
+                metadata->>'case_name' as case_name,
+                metadata->>'xml_citation_count' as citation_count,
+                metadata->>'xml_citations' as citations,
+                metadata->>'court_id' as court_id
+            FROM public.court_documents
+            WHERE metadata->>'xml_parsing_enabled' = 'true'
+              AND metadata->>'xml_citation_count' IS NOT NULL
+              AND (metadata->>'xml_citation_count')::int > 0
+        """
+    elif field == 'motions':
+        query = """
+            SELECT
+                id,
+                case_number,
+                metadata->>'case_name' as case_name,
+                metadata->>'xml_legal_motions' as motions,
+                metadata->>'court_id' as court_id
+            FROM public.court_documents
+            WHERE metadata->>'xml_parsing_enabled' = 'true'
+              AND metadata->>'xml_legal_motions' IS NOT NULL
+        """
+    elif field == 'rules':
+        query = """
+            SELECT
+                id,
+                case_number,
+                metadata->>'case_name' as case_name,
+                metadata->>'xml_federal_rules' as rules,
+                metadata->>'court_id' as court_id
+            FROM public.court_documents
+            WHERE metadata->>'xml_parsing_enabled' = 'true'
+              AND metadata->>'xml_federal_rules' IS NOT NULL
+        """
+    elif field == 'statutes':
+        query = """
+            SELECT
+                id,
+                case_number,
+                metadata->>'case_name' as case_name,
+                metadata->>'xml_statutes' as statutes,
+                metadata->>'court_id' as court_id
+            FROM public.court_documents
+            WHERE metadata->>'xml_parsing_enabled' = 'true'
+              AND metadata->>'xml_statutes' IS NOT NULL
+        """
+    else:  # all
+        query = """
+            SELECT
+                id,
+                case_number,
+                metadata->>'case_name' as case_name,
+                metadata->>'xml_judge_full' as xml_judge,
+                metadata->>'xml_citation_count' as citation_count,
+                metadata->>'xml_legal_motions' as motions,
+                metadata->>'xml_federal_rules' as rules,
+                metadata->>'xml_statutes' as statutes,
+                metadata->>'court_id' as court_id
+            FROM public.court_documents
+            WHERE metadata->>'xml_parsing_enabled' = 'true'
+        """
+
+    params = []
+
+    # Add filters
+    if court:
+        query += " AND metadata->>'court_id' = %s"
+        params.append(court)
+
+    if judge:
+        query += " AND metadata->>'judge_name' ILIKE %s"
+        params.append(f'%{judge}%')
+
+    query += " ORDER BY id DESC LIMIT %s"
+    params.append(limit)
+
+    cur.execute(query, params)
+    results = cur.fetchall()
+
+    if format == 'json':
+        import json
+        data = []
+        for row in results:
+            if field == 'all':
+                data.append({
+                    'id': row[0],
+                    'case_number': row[1],
+                    'case_name': row[2],
+                    'xml_judge': row[3],
+                    'citation_count': row[4],
+                    'motions': json.loads(row[5]) if row[5] else [],
+                    'rules': json.loads(row[6]) if row[6] else [],
+                    'statutes': json.loads(row[7]) if row[7] else [],
+                    'court_id': row[8]
+                })
+            else:
+                field_data = {'id': row[0], 'case_number': row[1], 'case_name': row[2]}
+                if field == 'judge':
+                    field_data.update({'standard_judge': row[3], 'xml_judge': row[4], 'court_id': row[5]})
+                elif field == 'citations':
+                    field_data.update({'citation_count': row[3], 'citations': json.loads(row[4]) if row[4] else [], 'court_id': row[5]})
+                elif field in ['motions', 'rules', 'statutes']:
+                    field_data.update({field: json.loads(row[3]) if row[3] else [], 'court_id': row[4]})
+                data.append(field_data)
+        print(json.dumps(data, indent=2))
+    elif format == 'csv':
+        if field == 'judge':
+            print("id,case_number,case_name,standard_judge,xml_judge,court_id")
+            for row in results:
+                print(f"{row[0]},{row[1]},{row[2]},{row[3]},{row[4]},{row[5]}")
+        elif field == 'citations':
+            print("id,case_number,case_name,citation_count,court_id")
+            for row in results:
+                print(f"{row[0]},{row[1]},{row[2]},{row[3]},{row[5]}")
+        # Add other CSV formats as needed
+    else:  # table format
+        if not results:
+            console.print("[yellow]No XML data found for the specified field[/yellow]")
+            cur.close()
+            conn.close()
+            return
+
+        console.print(f"Found {len(results)} documents with {field} data\n")
+
+        if field == 'judge':
+            table = Table(show_header=True)
+            table.add_column("ID", width=8)
+            table.add_column("Case", width=30)
+            table.add_column("Standard Judge", width=20)
+            table.add_column("XML Judge", width=25)
+            table.add_column("Court", width=8)
+
+            for row in results:
+                table.add_row(str(row[0]), (row[2] or "Unknown")[:30], (row[3] or "-")[:20], (row[4] or "-")[:25], row[5] or "-")
+
+        elif field == 'citations':
+            table = Table(show_header=True)
+            table.add_column("ID", width=8)
+            table.add_column("Case", width=35)
+            table.add_column("Citations", width=10)
+            table.add_column("Court", width=8)
+
+            for row in results:
+                table.add_row(str(row[0]), (row[2] or "Unknown")[:35], str(row[3]) if row[3] else "0", row[5] or "-")
+
+        elif field in ['motions', 'rules', 'statutes']:
+            table = Table(show_header=True)
+            table.add_column("ID", width=8)
+            table.add_column("Case", width=30)
+            table.add_column(field.title(), width=40)
+            table.add_column("Court", width=8)
+
+            for row in results:
+                import json
+                items = json.loads(row[3]) if row[3] else []
+                items_str = ', '.join(items[:3]) + ('...' if len(items) > 3 else '')
+                table.add_row(str(row[0]), (row[2] or "Unknown")[:30], items_str[:40], row[4] or "-")
+
+        elif field == 'all':
+            table = Table(show_header=True)
+            table.add_column("ID", width=8)
+            table.add_column("Case", width=25)
+            table.add_column("Judge", width=20)
+            table.add_column("Cites", width=6)
+            table.add_column("Motions", width=8)
+            table.add_column("Rules", width=8)
+            table.add_column("Court", width=8)
+
+            for row in results:
+                import json
+                motions = json.loads(row[5]) if row[5] else []
+                rules = json.loads(row[6]) if row[6] else []
+                table.add_row(
+                    str(row[0]),
+                    (row[2] or "Unknown")[:25],
+                    (row[3] or "-")[:20],
+                    str(row[4]) if row[4] else "0",
+                    str(len(motions)),
+                    str(len(rules)),
+                    row[8] or "-"
+                )
+
+        console.print(table)
+
+    cur.close()
+    conn.close()
+
+@data.command()
 @click.option('--type', 'doc_type', type=click.Choice(['opinion', 'opinion_doctor', '020lead', 'docket', 'all']), default='all', help='Document type filter')
 @click.option('--judge', help='Filter by judge name')
 @click.option('--court', help='Filter by court ID')
@@ -1524,6 +1832,225 @@ def export(doc_type, judge, court, after, before, limit, output_format, full_con
 def search():
     """Search indexed court documents"""
     pass
+
+@search.command()
+@click.argument('query', required=False)
+@click.option('--xml-only', is_flag=True, help='Search only XML-enhanced documents')
+@click.option('--min-citations', type=int, help='Minimum number of citations')
+@click.option('--has-motions', is_flag=True, help='Only documents with legal motions')
+@click.option('--has-rules', is_flag=True, help='Only documents with federal rules')
+@click.option('--judge', help='Filter by judge name')
+@click.option('--court', help='Filter by court ID')
+@click.option('--after', help='Date after (YYYY-MM-DD)')
+@click.option('--before', help='Date before (YYYY-MM-DD)')
+@click.option('--type', 'doc_type', type=click.Choice(['opinion', 'docket', 'order']), help='Document type')
+@click.option('--case-name', help='Search in case names')
+@click.option('--docket', help='Search by docket number')
+@click.option('--limit', default=20, help='Number of results')
+@click.option('--show-content', is_flag=True, help='Show content preview')
+@click.option('--show-xml', is_flag=True, help='Show XML metadata')
+@click.option('--export', type=click.Choice(['json', 'csv']), help='Export format')
+def enhanced(query, xml_only, min_citations, has_motions, has_rules, judge, court, after, before, doc_type, case_name, docket, limit, show_content, show_xml, export):
+    """Search with XML-enhanced filtering and metadata
+
+    Examples:
+        court-processor search enhanced "patent" --xml-only --min-citations 5
+        court-processor search enhanced --has-motions --court txed
+        court-processor search enhanced --judge Gilstrap --show-xml
+    """
+    console.print("\n[bold blue]🔍 Enhanced XML-Powered Search[/bold blue]\n")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Build search query with XML enhancements
+    conditions = []
+    params = []
+
+    # XML filtering
+    if xml_only:
+        conditions.append("metadata->>'xml_parsing_enabled' = 'true'")
+
+    if min_citations:
+        conditions.append("(metadata->>'xml_citation_count')::int >= %s")
+        params.append(min_citations)
+
+    if has_motions:
+        conditions.append("metadata->>'xml_legal_motions' IS NOT NULL")
+
+    if has_rules:
+        conditions.append("metadata->>'xml_federal_rules' IS NOT NULL")
+
+    # Standard filters
+    if query:
+        conditions.append("(content ILIKE %s OR metadata->>'case_name' ILIKE %s)")
+        params.extend([f'%{query}%', f'%{query}%'])
+
+    if judge:
+        if xml_only:
+            conditions.append("(metadata->>'xml_judge_full' ILIKE %s OR metadata->>'judge_name' ILIKE %s)")
+            params.extend([f'%{judge}%', f'%{judge}%'])
+        else:
+            conditions.append("metadata->>'judge_name' ILIKE %s")
+            params.append(f'%{judge}%')
+
+    if court:
+        conditions.append("metadata->>'court_id' = %s")
+        params.append(court)
+
+    if after:
+        conditions.append("metadata->>'date_filed' >= %s")
+        params.append(after)
+
+    if before:
+        conditions.append("metadata->>'date_filed' <= %s")
+        params.append(before)
+
+    if doc_type:
+        conditions.append("document_type = %s")
+        params.append(doc_type)
+
+    if case_name:
+        conditions.append("metadata->>'case_name' ILIKE %s")
+        params.append(f'%{case_name}%')
+
+    if docket:
+        conditions.append("metadata->>'docket_number' ILIKE %s")
+        params.append(f'%{docket}%')
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+    # Enhanced search query with XML fields
+    search_query = f"""
+        SELECT
+            id,
+            case_number,
+            document_type,
+            metadata->>'case_name' as case_name,
+            metadata->>'court_id' as court_id,
+            metadata->>'judge_name' as judge_name,
+            metadata->>'xml_judge_full' as xml_judge,
+            metadata->>'date_filed' as date_filed,
+            metadata->>'docket_number' as docket_number,
+            metadata->>'xml_citation_count' as citation_count,
+            metadata->>'xml_citations' as citations,
+            metadata->>'xml_legal_motions' as motions,
+            metadata->>'xml_federal_rules' as rules,
+            metadata->>'xml_parsing_enabled' as xml_enabled,
+            LENGTH(content) as content_length,
+            SUBSTRING(content, 1, 500) as content_preview
+        FROM public.court_documents
+        WHERE {where_clause}
+        ORDER BY
+            CASE
+                WHEN metadata->>'date_filed' IS NOT NULL AND metadata->>'date_filed' != ''
+                THEN (metadata->>'date_filed')::date
+                ELSE created_at::date
+            END DESC
+        LIMIT %s
+    """
+    params.append(limit)
+
+    cur.execute(search_query, params)
+    results = cur.fetchall()
+
+    # Count total matches
+    count_query = f"SELECT COUNT(*) FROM public.court_documents WHERE {where_clause}"
+    cur.execute(count_query, params[:-1])  # Exclude limit
+    total_matches = cur.fetchone()[0]
+
+    if export == 'json':
+        import json
+        data = []
+        for r in results:
+            doc_data = {
+                'id': r[0],
+                'case_number': r[1],
+                'type': r[2],
+                'case_name': r[3],
+                'court': r[4],
+                'judge': r[5],
+                'xml_judge': r[6],
+                'date_filed': r[7],
+                'docket': r[8],
+                'content_length': r[14],
+                'xml_enabled': r[13] == 'true'
+            }
+            if show_xml and r[13] == 'true':
+                doc_data.update({
+                    'citation_count': int(r[9]) if r[9] else 0,
+                    'citations': json.loads(r[10]) if r[10] else [],
+                    'motions': json.loads(r[11]) if r[11] else [],
+                    'rules': json.loads(r[12]) if r[12] else []
+                })
+            if show_content and r[15]:
+                doc_data['preview'] = r[15][:200]
+            data.append(doc_data)
+        print(json.dumps(data, indent=2))
+    elif export == 'csv':
+        headers = "id,case_number,type,case_name,court,judge,xml_judge,date_filed,docket,citation_count,content_length,xml_enabled"
+        print(headers)
+        for r in results:
+            citation_count = r[9] if r[9] else 0
+            xml_enabled = r[13] == 'true'
+            print(f"{r[0]},{r[1]},{r[2]},{r[3]},{r[4]},{r[5]},{r[6]},{r[7]},{r[8]},{citation_count},{r[14]},{xml_enabled}")
+    else:
+        console.print(f"Found {total_matches} matching documents (showing {len(results)})\n")
+
+        if results:
+            for idx, r in enumerate(results, 1):
+                console.print(f"[bold cyan]{'─' * 80}[/bold cyan]")
+                console.print(f"[bold]Result {idx}[/bold] | ID: {r[0]} | Type: {r[2] or 'unknown'}")
+
+                if r[3]:
+                    console.print(f"[cyan]Case:[/cyan] {r[3]}")
+
+                # Enhanced judge display
+                if r[6] and r[6] != r[5]:  # XML judge different from standard
+                    console.print(f"[cyan]Judge (XML):[/cyan] {r[6]}")
+                    if r[5]:
+                        console.print(f"[cyan]Judge (Standard):[/cyan] {r[5]}")
+                elif r[5]:
+                    console.print(f"[cyan]Judge:[/cyan] {r[5]}")
+
+                if r[4]:
+                    console.print(f"[cyan]Court:[/cyan] {r[4]}")
+                if r[7]:
+                    console.print(f"[cyan]Date:[/cyan] {r[7][:10]}")
+                if r[8]:
+                    console.print(f"[cyan]Docket:[/cyan] {r[8]}")
+
+                console.print(f"[cyan]Content:[/cyan] {r[14]:,} chars")
+
+                # XML metadata display
+                if show_xml and r[13] == 'true':
+                    xml_info = []
+                    if r[9]:
+                        xml_info.append(f"Citations: {r[9]}")
+                    if r[11]:
+                        import json
+                        motions = json.loads(r[11]) if r[11] else []
+                        xml_info.append(f"Motions: {len(motions)}")
+                    if r[12]:
+                        import json
+                        rules = json.loads(r[12]) if r[12] else []
+                        xml_info.append(f"Rules: {len(rules)}")
+
+                    if xml_info:
+                        console.print(f"[cyan]XML Data:[/cyan] {', '.join(xml_info)}")
+
+                if show_content and r[15]:
+                    preview = ' '.join(r[15].split())[:300]
+                    console.print(f"\n[dim]{preview}...[/dim]")
+                console.print()
+
+            if total_matches > limit:
+                console.print(f"[dim]Showing first {limit} results. Use --limit to see more.[/dim]")
+        else:
+            console.print("[yellow]No documents found matching search criteria[/yellow]")
+
+    cur.close()
+    conn.close()
 
 @search.command()
 @click.argument('query', required=False)

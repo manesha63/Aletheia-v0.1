@@ -79,6 +79,9 @@ handle_court_command() {
         status)
             court_status
             ;;
+        api)
+            court_api_examples "$@"
+            ;;
         help|--help|-h|"")
             court_help
             ;;
@@ -357,6 +360,48 @@ court_status() {
     fi
 }
 
+# Court processor API examples and access
+court_api_examples() {
+    local cmd="$1"
+
+    if [ "$OUTPUT_FORMAT" = "json" ]; then
+        echo '{"status":"info","api_port":"'${COURT_PROCESSOR_PORT:-8104}'","endpoints":["bulk","documents","search","list"]}'
+    else
+        echo -e "${CYAN}📡 Court Processor API Access${NC}"
+        echo ""
+        echo -e "${GREEN}API Base URL:${NC} http://localhost:${COURT_PROCESSOR_PORT:-8104}/"
+        echo ""
+        echo -e "${CYAN}🔍 Key Endpoints:${NC}"
+        echo "  GET /                           # API documentation and health"
+        echo "  GET /bulk/judge/{name}          # Bulk retrieval by judge with XML metadata"
+        echo "  GET /documents/{id}             # Individual document with full metadata"
+        echo "  GET /search?q={query}           # Search documents"
+        echo "  GET /list                       # List recent documents"
+        echo ""
+        echo -e "${CYAN}💡 Bulk Data Examples:${NC}"
+        echo "  # Get all 020lead documents for Gilstrap with XML metadata (metadata only)"
+        echo "  curl \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/bulk/judge/Gilstrap?type=020lead&include_text=false\""
+        echo ""
+        echo "  # Get all published opinions for Tigar with full text"
+        echo "  curl \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/bulk/judge/Tigar?type=published_opinion&include_text=true\""
+        echo ""
+        echo "  # Get all document types for a judge"
+        echo "  curl \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/bulk/judge/Gilstrap?type=all&include_text=false\""
+        echo ""
+        echo -e "${CYAN}📊 XML Metadata Features:${NC}"
+        echo "  • parsing_enabled: Whether XML parsing was applied"
+        echo "  • citation_count: Number of legal citations found"
+        echo "  • citations[]: Array of extracted citations"
+        echo "  • legal_motions[]: Array of legal motions identified"
+        echo "  • federal_rules[]: Array of federal rules referenced"
+        echo "  • statutes[]: Array of statutes referenced"
+        echo "  • judge_full: Full judge name from XML parsing"
+        echo ""
+        echo -e "${CYAN}⚡ Quick Test:${NC}"
+        echo "  curl -s \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/\" | jq ."
+    fi
+}
+
 # Court processor help
 court_help() {
     if [ "$OUTPUT_FORMAT" = "json" ]; then
@@ -389,6 +434,7 @@ court_help() {
         echo "  data             Manage data quality and XML-enhanced collection"
         echo "  search           Search indexed court documents (basic & enhanced)"
         echo "  pipeline         Run document processing pipeline"
+        echo "  api              Show API endpoints and bulk data examples"
         echo "  status           Check court processor service status"
         echo ""
         echo "XML-Enhanced Features:"

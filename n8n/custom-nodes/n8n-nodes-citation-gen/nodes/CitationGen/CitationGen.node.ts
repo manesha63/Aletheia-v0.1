@@ -108,42 +108,20 @@ interface ProcessedDocument {
   };
 }
 
-interface HierarchicalDocument {
-  id?: number;
-  content: string;
-  summary?: string;
-  batch_id: string;
-  hierarchy_level: number;
-  parent_id?: number | null;
-  child_ids?: number[];
-  metadata?: IDataObject;
-  created_at?: Date;
-  updated_at?: Date;
-  // New fields for better traceability
-  document_type?: 'source' | 'chunk' | 'batch' | 'summary' | 'section' | 'group';
-  chunk_index?: number;
-  source_document_ids?: number[];
-  token_count?: number;
-  section_id?: string;            // Reference to original section ID
-  group_key?: string;             // Group identifier for pattern analysis
+// Elasticsearch configuration
+interface ElasticsearchConfig {
+  host: string;
+  port: number;
+  index: string;
 }
 
-interface ProcessingConfig {
-  summaryPrompt: string;
-  contextPrompt: string;
-  batchSize: number;
-  batchId: string;
-  resilience?: ResilienceConfig;
-  strategy?: ProcessingStrategy;   // New: Processing strategy
-  sections?: DocumentSection[];    // New: Pre-chunked sections
-}
-
-interface DocumentChunk {
+// Document batch for initial processing
+interface DocumentBatch {
+  id: string;
   content: string;
-  index: number;
-  parentDocumentId?: number;
-  tokenCount: number;
-  metadata?: any;
+  start_index: number;
+  end_index: number;
+  token_count: number;
 }
 
 interface RetryConfig {
@@ -319,8 +297,8 @@ export class CitationGen implements INodeType {
     icon: 'file:citationGen.svg',
     group: ['transform'],
     version: 1,
-    subtitle: '=Flexible Document Processing',
-    description: 'Process pre-chunked documents with metadata-driven summarization and pattern analysis',
+    subtitle: '=Smart Legal Document Processing',
+    description: 'Process legal opinions and transcripts with AI-powered summarization and Elasticsearch grouping',
     defaults: {
       name: 'Citation Generator',
     },
@@ -2872,4 +2850,95 @@ async function generateFinalSynthesis(
       documentType: strategy.documentType,
     },
   };
+}
+
+// NEW CLEAN ARCHITECTURE METHODS
+
+// STUB METHODS - TO BE IMPLEMENTED IN NEXT PHASE
+
+private async generateInitialSummaries(
+  doc: DocumentInput,
+  config: ProcessingConfig,
+  pool: Pool
+): Promise<TaggedSummary[]> {
+  // PHASE 1 IMPLEMENTATION:
+  // 1. Break document into batches based on token count
+  // 2. For each batch: generate summary + AI tags
+  // 3. Store in database
+  // 4. Return TaggedSummary array
+
+  console.log(`[CG] Starting initial summarization for document ${doc.id}`);
+
+  // Placeholder implementation
+  const batches = this.createDocumentBatches(doc.content, 4000);
+  const summaries: TaggedSummary[] = [];
+
+  for (const [index, batch] of batches.entries()) {
+    // TODO: Implement actual AI summarization + tagging
+    const summary: TaggedSummary = {
+      id: uuidv4(),
+      document_id: doc.id,
+      batch_index: index,
+      summary_text: `Summary of batch ${index + 1}/${batches.length}`,
+      ai_tags: [
+        {
+          type: 'status',
+          value: 'processing',
+          source_reference: `batch_${index}`,
+          raw_tag: '<**status:processing**>'
+        }
+      ],
+      token_count: batch.token_count,
+      source_content: batch.content
+    };
+
+    summaries.push(summary);
+  }
+
+  return summaries;
+}
+
+private async performElasticsearchGrouping(
+  summaries: TaggedSummary[],
+  config: ProcessingConfig,
+  pool: Pool
+): Promise<any> {
+  // PHASE 2 IMPLEMENTATION:
+  // 1. Index summaries in Elasticsearch
+  // 2. Execute grouping patterns
+  // 3. Generate second-level summaries for each group
+  // 4. Return grouped analysis
+
+  console.log(`[CG] Starting Elasticsearch grouping for ${summaries.length} summaries`);
+
+  // Placeholder implementation
+  return {
+    by_status: [],
+    by_parties: [],
+    by_code_outcome: []
+  };
+}
+
+private createDocumentBatches(content: string, maxTokens: number): DocumentBatch[] {
+  const batches: DocumentBatch[] = [];
+  const words = content.split(/\s+/);
+  const tokensPerWord = 1.3; // Rough estimate
+  const wordsPerBatch = Math.floor(maxTokens / tokensPerWord);
+
+  for (let i = 0; i < words.length; i += wordsPerBatch) {
+    const batchWords = words.slice(i, i + wordsPerBatch);
+    const batchContent = batchWords.join(' ');
+
+    batches.push({
+      id: uuidv4(),
+      content: batchContent,
+      start_index: i,
+      end_index: Math.min(i + wordsPerBatch, words.length),
+      token_count: Math.ceil(batchWords.length * tokensPerWord)
+    });
+  }
+
+  return batches;
+}
+
 }

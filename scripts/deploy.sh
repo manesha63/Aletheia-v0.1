@@ -152,10 +152,8 @@ build_compose_files() {
         COMPOSE_FILES+=("docker-compose.env.yml")
     fi
     
-    # Add Haystack if needed
-    if [[ -f "n8n/docker-compose.haystack.yml" ]]; then
-        COMPOSE_FILES+=("n8n/docker-compose.haystack.yml")
-    fi
+    # Haystack services are now integrated into main docker-compose.yml
+    # No additional compose files needed for Haystack
     
     # Add environment-specific compose files
     case $ENVIRONMENT in

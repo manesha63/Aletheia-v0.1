@@ -221,9 +221,16 @@ async def health():
         "api": "Simplified Court Documents API v2",
         "endpoints": {
             "GET /text/{id}": "Get plain text directly",
-            "GET /documents/{id}": "Get full document info", 
+            "GET /documents/{id}": "Get full document info with XML metadata",
             "GET /search": "Simple search with direct text",
-            "GET /list": "List recent documents"
+            "GET /list": "List recent documents",
+            "GET /bulk/judge/{name}": "Bulk retrieval by judge with XML metadata",
+            "GET /sample": "Sample document for testing"
+        },
+        "features": {
+            "xml_metadata": "Rich legal metadata (citations, motions, rules)",
+            "bulk_export": "Large-scale data retrieval by judge",
+            "full_text": "Complete document content extraction"
         }
     }
 

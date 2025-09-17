@@ -68,6 +68,7 @@ show_help() {
     echo "  court collect   Collect documents from various sources"
     echo "  court data      Manage data quality and XML-enhanced collection"
     echo "  court search    Search indexed documents (basic & enhanced)"
+    echo "  court api       Show API endpoints and bulk data examples"
     echo "  court help      More court commands"
     echo ""
     echo -e "${CYAN}📊 XML-Enhanced Features:${NC}"

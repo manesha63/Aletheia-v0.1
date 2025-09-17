@@ -6,6 +6,12 @@
 # Provides dev CLI integration with the court-processor standalone CLI
 # Maintains separation of concerns by delegating to the court-processor container
 
+# Get court API URL with runtime port resolution
+get_court_api_url() {
+    local port="${COURT_PROCESSOR_PORT:-8104}"
+    echo "http://localhost:${port}"
+}
+
 # Validate court-processor is available
 validate_court_processor() {
     if ! $DOCKER_COMPOSE ps court-processor | grep -q "Up"; then
@@ -319,7 +325,8 @@ court_status() {
             status="running"
             
             # Check API health
-            if curl -s "http://localhost:${COURT_PROCESSOR_PORT:-8104}/" >/dev/null 2>&1; then
+            local api_url=$(get_court_api_url)
+            if curl -s "${api_url}/" >/dev/null 2>&1; then
                 api_status="healthy"
             else
                 api_status="unhealthy"
@@ -327,31 +334,34 @@ court_status() {
             
             # Get document count if service is running
             if [ "$api_status" = "healthy" ]; then
-                data_count=$(curl -s "http://localhost:${COURT_PROCESSOR_PORT:-8104}/list?limit=1" | jq -r '.count // 0' 2>/dev/null || echo 0)
+                data_count=$(curl -s "${api_url}/list?limit=1" | jq -r '.count // 0' 2>/dev/null || echo 0)
             fi
         fi
         
-        echo "{\"status\":\"$status\",\"api\":\"$api_status\",\"port\":${COURT_PROCESSOR_PORT:-8104},\"documents\":$data_count}"
+        local port="${COURT_PROCESSOR_PORT:-8104}"
+        echo "{\"status\":\"$status\",\"api\":\"$api_status\",\"port\":$port,\"documents\":$data_count}"
     else
         echo -e "\n${CYAN}📋 Court Processor Status${NC}\n"
         
         # Service status
         if $DOCKER_COMPOSE ps court-processor | grep -q "Up"; then
             echo -e "${GREEN}✅ Service: Running${NC}"
-            
+
             # API health check
-            if curl -s "http://localhost:${COURT_PROCESSOR_PORT:-8104}/" >/dev/null 2>&1; then
-                echo -e "${GREEN}✅ API: Healthy (port ${COURT_PROCESSOR_PORT:-8104})${NC}"
-                
+            local api_url=$(get_court_api_url)
+            local port="${COURT_PROCESSOR_PORT:-8104}"
+            if curl -s "${api_url}/" >/dev/null 2>&1; then
+                echo -e "${GREEN}✅ API: Healthy (port ${port})${NC}"
+
                 # Document count
-                local count=$(curl -s "http://localhost:${COURT_PROCESSOR_PORT:-8104}/list?limit=1" | jq -r '.count // 0' 2>/dev/null || echo "unknown")
+                local count=$(curl -s "${api_url}/list?limit=1" | jq -r '.count // 0' 2>/dev/null || echo "unknown")
                 echo -e "${CYAN}📄 Documents: ${count}${NC}"
                 
                 # Quick data quality check via CLI
                 echo -e "\n${CYAN}Data Quality:${NC}"
                 execute_court_cli "data status" | head -20
             else
-                echo -e "${YELLOW}⚠️  API: Unhealthy (port ${COURT_PROCESSOR_PORT:-8104})${NC}"
+                echo -e "${YELLOW}⚠️  API: Unhealthy (port ${port})${NC}"
             fi
         else
             echo -e "${RED}❌ Service: Not running${NC}"
@@ -364,12 +374,15 @@ court_status() {
 court_api_examples() {
     local cmd="$1"
 
+    local port="${COURT_PROCESSOR_PORT:-8104}"
+    local api_url=$(get_court_api_url)
+
     if [ "$OUTPUT_FORMAT" = "json" ]; then
-        echo '{"status":"info","api_port":"'${COURT_PROCESSOR_PORT:-8104}'","endpoints":["bulk","documents","search","list"]}'
+        echo '{"status":"info","api_port":"'$port'","endpoints":["bulk","documents","search","list"]}'
     else
         echo -e "${CYAN}📡 Court Processor API Access${NC}"
         echo ""
-        echo -e "${GREEN}API Base URL:${NC} http://localhost:${COURT_PROCESSOR_PORT:-8104}/"
+        echo -e "${GREEN}API Base URL:${NC} ${api_url}/"
         echo ""
         echo -e "${CYAN}🔍 Key Endpoints:${NC}"
         echo "  GET /                           # API documentation and health"
@@ -380,13 +393,13 @@ court_api_examples() {
         echo ""
         echo -e "${CYAN}💡 Bulk Data Examples:${NC}"
         echo "  # Get all 020lead documents for Gilstrap with XML metadata (metadata only)"
-        echo "  curl \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/bulk/judge/Gilstrap?type=020lead&include_text=false\""
+        echo "  curl \"${api_url}/bulk/judge/Gilstrap?type=020lead&include_text=false\""
         echo ""
         echo "  # Get all published opinions for Tigar with full text"
-        echo "  curl \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/bulk/judge/Tigar?type=published_opinion&include_text=true\""
+        echo "  curl \"${api_url}/bulk/judge/Tigar?type=published_opinion&include_text=true\""
         echo ""
         echo "  # Get all document types for a judge"
-        echo "  curl \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/bulk/judge/Gilstrap?type=all&include_text=false\""
+        echo "  curl \"${api_url}/bulk/judge/Gilstrap?type=all&include_text=false\""
         echo ""
         echo -e "${CYAN}📊 XML Metadata Features:${NC}"
         echo "  • parsing_enabled: Whether XML parsing was applied"
@@ -398,7 +411,7 @@ court_api_examples() {
         echo "  • judge_full: Full judge name from XML parsing"
         echo ""
         echo -e "${CYAN}⚡ Quick Test:${NC}"
-        echo "  curl -s \"http://localhost:${COURT_PROCESSOR_PORT:-8104}/\" | jq ."
+        echo "  curl -s \"${api_url}/\" | jq ."
     fi
 }
 

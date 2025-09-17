@@ -205,6 +205,18 @@ case "$1" in
         handle_deps_command "$2" "${@:3}"
         ;;
 
+    # Elasticsearch Management
+    es)
+        source dev-modules/dev-elasticsearch.sh
+        handle_es_command "$2" "${@:3}"
+        ;;
+
+    # Document Search
+    search)
+        source dev-modules/dev-elasticsearch.sh
+        handle_search_command "$2" "${@:3}"
+        ;;
+
     # Workflow Execution
     execute)
         workflow_name="$2"

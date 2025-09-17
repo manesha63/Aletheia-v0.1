@@ -626,7 +626,21 @@ async def get_bulk_by_judge(
                 "judge": metadata.get('judge_name', judge_name),
                 "court": metadata.get('court_id', 'Unknown'),
                 "date_filed": metadata.get('date_filed'),
-                "created": str(doc['created_at'])
+                "created": str(doc['created_at']),
+                # Always include XML metadata structure (unconditionally)
+                "xml_metadata": {
+                    "parsing_enabled": metadata.get('xml_parsing_enabled', False),
+                    "judge_full": metadata.get('xml_judge_full'),
+                    "judge_name": metadata.get('xml_judge_name'),
+                    "opinion_type": metadata.get('xml_opinion_type'),
+                    "citation_count": metadata.get('xml_citation_count', 0) if metadata.get('xml_parsing_enabled') else 0,
+                    "paragraph_count": metadata.get('xml_paragraph_count', 0) if metadata.get('xml_parsing_enabled') else 0,
+                    "citations": metadata.get('xml_citations', []) if metadata.get('xml_parsing_enabled') else [],
+                    "legal_motions": metadata.get('xml_legal_motions', []) if metadata.get('xml_parsing_enabled') else [],
+                    "federal_rules": metadata.get('xml_federal_rules', []) if metadata.get('xml_parsing_enabled') else [],
+                    "statutes": metadata.get('xml_statutes', []) if metadata.get('xml_parsing_enabled') else [],
+                    "page_numbers": metadata.get('xml_page_numbers', []) if metadata.get('xml_parsing_enabled') else []
+                }
             }
             
             if include_text:

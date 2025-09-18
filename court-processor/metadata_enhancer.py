@@ -216,6 +216,194 @@ class JudgeContentExtractor:
         return None
 
 
+class DocumentDateExtractor:
+    """Extract various dates from legal document content"""
+
+    # Date patterns optimized for legal documents - based on actual document analysis
+    DATE_PATTERNS = [
+        # Filed dates - highest priority as most reliable
+        {
+            'pattern': r'(?:Filed|FILED):\s*([^\n\r<]+)',
+            'type': 'filing_date',
+            'confidence': 0.9
+        },
+        {
+            'pattern': r'(?:Date Filed|DATE FILED):\s*([^\n\r<]+)',
+            'type': 'filing_date',
+            'confidence': 0.9
+        },
+
+        # Decision/Entered dates
+        {
+            'pattern': r'(?:Decided|DECIDED|Entered|ENTERED):\s*([^\n\r<]+)',
+            'type': 'decision_date',
+            'confidence': 0.9
+        },
+        {
+            'pattern': r'(?:Date Decided|DATE DECIDED|Date Entered|DATE ENTERED):\s*([^\n\r<]+)',
+            'type': 'decision_date',
+            'confidence': 0.9
+        },
+
+        # Order/Opinion dates
+        {
+            'pattern': r'(?:Order Date|ORDER DATE):\s*([^\n\r<]+)',
+            'type': 'document_date',
+            'confidence': 0.8
+        },
+
+        # In-text dates like "On April 12, 2018"
+        {
+            'pattern': r'(?:On|on)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})',
+            'type': 'document_date',
+            'confidence': 0.7
+        },
+
+        # ISO dates (YYYY-MM-DD) - common in metadata
+        {
+            'pattern': r'(\d{4}-\d{2}-\d{2})',
+            'type': 'document_date',
+            'confidence': 0.6
+        },
+
+        # US format dates (MM/DD/YYYY)
+        {
+            'pattern': r'(\d{1,2}/\d{1,2}/\d{4})',
+            'type': 'document_date',
+            'confidence': 0.6
+        },
+
+        # Long format dates (Month DD, YYYY)
+        {
+            'pattern': r'((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})',
+            'type': 'document_date',
+            'confidence': 0.7
+        }
+    ]
+
+    @classmethod
+    def normalize_date_string(cls, date_str: str) -> Optional[str]:
+        """Convert various date formats to ISO 8601 (YYYY-MM-DD)"""
+        import re
+        from datetime import datetime
+
+        if not date_str or not date_str.strip():
+            return None
+
+        date_str = date_str.strip()
+
+        # Clean up common artifacts
+        date_str = re.sub(r'<[^>]*>', '', date_str)  # Remove XML tags
+        date_str = re.sub(r'\s+', ' ', date_str)     # Normalize whitespace
+        date_str = date_str.strip()
+
+        # Try different parsing approaches
+        date_formats = [
+            '%Y-%m-%d',           # ISO format: 2018-04-12
+            '%m/%d/%Y',           # US format: 04/12/2018
+            '%B %d, %Y',          # Long format: April 12, 2018
+            '%B %d %Y',           # Long format without comma: April 12 2018
+            '%b %d, %Y',          # Short month: Apr 12, 2018
+            '%b %d %Y',           # Short month without comma: Apr 12 2018
+        ]
+
+        for fmt in date_formats:
+            try:
+                parsed_date = datetime.strptime(date_str, fmt)
+                # Validate reasonable date range for legal documents
+                if 1900 <= parsed_date.year <= 2030:
+                    return parsed_date.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+
+        return None
+
+    @classmethod
+    def extract_dates_from_content(cls, content: str) -> List[Dict[str, Any]]:
+        """Extract all dates from document content with type and confidence"""
+        if not content:
+            return []
+
+        # Search in first 3000 characters where dates are typically located
+        content_start = content[:3000]
+        extracted_dates = []
+
+        for pattern_info in cls.DATE_PATTERNS:
+            pattern = pattern_info['pattern']
+            date_type = pattern_info['type']
+            confidence = pattern_info['confidence']
+
+            matches = re.findall(pattern, content_start, re.IGNORECASE)
+
+            for match in matches:
+                # Normalize the date string
+                normalized_date = cls.normalize_date_string(match)
+
+                if normalized_date:
+                    extracted_dates.append({
+                        'date': normalized_date,
+                        'type': date_type,
+                        'confidence': confidence,
+                        'raw_text': match.strip()
+                    })
+
+        # Remove duplicates while preserving highest confidence
+        unique_dates = {}
+        for date_info in extracted_dates:
+            key = f"{date_info['date']}_{date_info['type']}"
+            if key not in unique_dates or date_info['confidence'] > unique_dates[key]['confidence']:
+                unique_dates[key] = date_info
+
+        return list(unique_dates.values())
+
+    @classmethod
+    def extract_comprehensive_date_info(cls, content: str = None,
+                                      existing_metadata: Dict = None) -> Optional[Dict]:
+        """Extract comprehensive date information from all sources"""
+
+        # Check existing metadata first
+        if existing_metadata:
+            has_filing_date = existing_metadata.get('filing_date')
+            has_decision_date = existing_metadata.get('decision_date')
+            has_document_date = existing_metadata.get('document_date')
+
+            if has_filing_date and has_decision_date and has_document_date:
+                return {
+                    'dates_found': True,
+                    'source': 'existing_metadata',
+                    'confidence': 1.0
+                }
+
+        # Extract from content
+        if content:
+            extracted_dates = cls.extract_dates_from_content(content)
+
+            if extracted_dates:
+                # Organize by type
+                date_info = {
+                    'filing_date': None,
+                    'decision_date': None,
+                    'document_date': None,
+                    'all_dates': extracted_dates
+                }
+
+                # Get the highest confidence date for each type
+                for date_obj in extracted_dates:
+                    date_type = date_obj['type']
+                    if not date_info[date_type] or date_obj['confidence'] > date_info[date_type]['confidence']:
+                        date_info[date_type] = date_obj
+
+                # Return the structured information
+                return {
+                    'dates_found': True,
+                    'source': 'content_extraction',
+                    'confidence': max(d['confidence'] for d in extracted_dates),
+                    'extracted_info': date_info
+                }
+
+        return None
+
+
 class MetadataEnhancer:
     """Main service for enhancing document metadata"""
 
@@ -243,6 +431,7 @@ class MetadataEnhancer:
             'documents_processed': 0,
             'judges_extracted': 0,
             'courts_extracted': 0,
+            'dates_extracted': 0,
             'metadata_updates': 0,
             'elasticsearch_updates': 0,
             'errors': []
@@ -357,6 +546,50 @@ class MetadataEnhancer:
                     extraction_sources['court_confidence'] = court_info['confidence']
                     self.stats['courts_extracted'] += 1
 
+            # Extract date information if missing
+            missing_dates = (
+                not enhanced_metadata.get('filing_date') or
+                not enhanced_metadata.get('decision_date') or
+                not enhanced_metadata.get('document_date')
+            )
+
+            if missing_dates:
+                date_info = DocumentDateExtractor.extract_comprehensive_date_info(
+                    content=content,
+                    existing_metadata=enhanced_metadata
+                )
+
+                if date_info and date_info.get('dates_found'):
+                    if date_info['source'] == 'content_extraction':
+                        extracted_info = date_info['extracted_info']
+
+                        # Add filing date if found and missing
+                        if extracted_info.get('filing_date') and not enhanced_metadata.get('filing_date'):
+                            enhanced_metadata['filing_date'] = extracted_info['filing_date']['date']
+                            extraction_sources['filing_date_source'] = 'content_extraction'
+                            extraction_sources['filing_date_confidence'] = extracted_info['filing_date']['confidence']
+
+                        # Add decision date if found and missing
+                        if extracted_info.get('decision_date') and not enhanced_metadata.get('decision_date'):
+                            enhanced_metadata['decision_date'] = extracted_info['decision_date']['date']
+                            extraction_sources['decision_date_source'] = 'content_extraction'
+                            extraction_sources['decision_date_confidence'] = extracted_info['decision_date']['confidence']
+
+                        # Add document date if found and missing
+                        if extracted_info.get('document_date') and not enhanced_metadata.get('document_date'):
+                            enhanced_metadata['document_date'] = extracted_info['document_date']['date']
+                            extraction_sources['document_date_source'] = 'content_extraction'
+                            extraction_sources['document_date_confidence'] = extracted_info['document_date']['confidence']
+
+                        # Store all extracted dates for reference
+                        if extracted_info.get('all_dates'):
+                            enhanced_metadata['extracted_dates'] = extracted_info['all_dates']
+
+                        # Update stats
+                        if not hasattr(self.stats, 'dates_extracted'):
+                            self.stats['dates_extracted'] = 0
+                        self.stats['dates_extracted'] += len(extracted_info.get('all_dates', []))
+
             # Add extraction metadata
             if extraction_sources:
                 enhanced_metadata['enhancement_info'] = {
@@ -405,6 +638,9 @@ class MetadataEnhancer:
                 'doc': {
                     'judge_name': enhanced_metadata.get('judge_name'),
                     'court_id': enhanced_metadata.get('court_id'),
+                    'filing_date': enhanced_metadata.get('filing_date'),
+                    'decision_date': enhanced_metadata.get('decision_date'),
+                    'document_date': enhanced_metadata.get('document_date'),
                     'enhanced_at': datetime.now(timezone.utc)
                 }
             }
@@ -435,6 +671,7 @@ class MetadataEnhancer:
                 'documents_processed': 0,
                 'judges_extracted': 0,
                 'courts_extracted': 0,
+                'dates_extracted': 0,
                 'metadata_updates': 0,
                 'elasticsearch_updates': 0,
                 'errors': []
@@ -487,6 +724,7 @@ class MetadataEnhancer:
         logger.info(f"Documents processed: {self.stats['documents_processed']}")
         logger.info(f"Judges extracted: {self.stats['judges_extracted']}")
         logger.info(f"Courts extracted: {self.stats['courts_extracted']}")
+        logger.info(f"Dates extracted: {self.stats['dates_extracted']}")
         logger.info(f"Database updates: {self.stats['metadata_updates']}")
         logger.info(f"Elasticsearch updates: {self.stats['elasticsearch_updates']}")
 

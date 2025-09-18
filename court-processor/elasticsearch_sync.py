@@ -178,6 +178,27 @@ class ElasticsearchSync:
                         },
                         "synced_at": {
                             "type": "date"
+                        },
+                        "filing_date": {
+                            "type": "date"
+                        },
+                        "decision_date": {
+                            "type": "date"
+                        },
+                        "document_date": {
+                            "type": "date"
+                        },
+                        "judge_name": {
+                            "type": "keyword",
+                            "fields": {
+                                "text": {
+                                    "type": "text",
+                                    "analyzer": "legal_analyzer"
+                                }
+                            }
+                        },
+                        "court_id": {
+                            "type": "keyword"
                         }
                     }
                 }
@@ -276,6 +297,14 @@ class ElasticsearchSync:
             if content and content.strip():
                 content_embedding = self.generate_embedding(content)
 
+            # Extract metadata for enhanced fields
+            metadata = doc.get('metadata', {})
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except:
+                    metadata = {}
+
             # Prepare Elasticsearch document
             es_doc = {
                 'id': doc['id'],
@@ -288,7 +317,13 @@ class ElasticsearchSync:
                 'created_at': doc.get('created_at'),
                 'updated_at': doc.get('updated_at'),
                 'synced_at': datetime.now(timezone.utc),
-                'metadata': doc.get('metadata', {})
+                'metadata': metadata,
+                # Enhanced fields from metadata
+                'judge_name': metadata.get('judge_name'),
+                'court_id': metadata.get('court_id'),
+                'filing_date': metadata.get('filing_date'),
+                'decision_date': metadata.get('decision_date'),
+                'document_date': metadata.get('document_date')
             }
 
             # Add embedding if generated successfully

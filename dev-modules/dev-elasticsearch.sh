@@ -360,6 +360,11 @@ es_display_search_results() {
         local doc_type=$(echo "$response" | jq -r ".hits.hits[$i]._source.document_type // \"N/A\"" 2>/dev/null)
         local score=$(echo "$response" | jq -r ".hits.hits[$i]._score // \"N/A\"" 2>/dev/null)
         local content=$(echo "$response" | jq -r ".hits.hits[$i]._source.content // \"\"" 2>/dev/null)
+        local judge_name=$(echo "$response" | jq -r ".hits.hits[$i]._source.judge_name // null" 2>/dev/null)
+        local court_id=$(echo "$response" | jq -r ".hits.hits[$i]._source.court_id // null" 2>/dev/null)
+        local filing_date=$(echo "$response" | jq -r ".hits.hits[$i]._source.filing_date // null" 2>/dev/null)
+        local decision_date=$(echo "$response" | jq -r ".hits.hits[$i]._source.decision_date // null" 2>/dev/null)
+        local document_date=$(echo "$response" | jq -r ".hits.hits[$i]._source.document_date // null" 2>/dev/null)
 
         echo -e "${CYAN}[$count] Document ID: $doc_id (Score: $score)${NC}"
         echo -e "${BLUE}Case: $case_number${NC}"
@@ -367,6 +372,29 @@ es_display_search_results() {
             echo -e "${BLUE}Name: $case_name${NC}"
         fi
         echo -e "${BLUE}Type: $doc_type${NC}"
+
+        # Show enhanced metadata
+        if [ "$judge_name" != "null" ] && [ -n "$judge_name" ]; then
+            echo -e "${BLUE}Judge: $judge_name${NC}"
+        fi
+        if [ "$court_id" != "null" ] && [ -n "$court_id" ]; then
+            echo -e "${BLUE}Court: $court_id${NC}"
+        fi
+
+        # Show dates
+        local dates_shown=false
+        if [ "$filing_date" != "null" ] && [ -n "$filing_date" ]; then
+            echo -e "${BLUE}Filed: $filing_date${NC}"
+            dates_shown=true
+        fi
+        if [ "$decision_date" != "null" ] && [ -n "$decision_date" ]; then
+            echo -e "${BLUE}Decided: $decision_date${NC}"
+            dates_shown=true
+        fi
+        if [ "$document_date" != "null" ] && [ -n "$document_date" ] && [ "$document_date" != "$filing_date" ] && [ "$document_date" != "$decision_date" ]; then
+            echo -e "${BLUE}Date: $document_date${NC}"
+            dates_shown=true
+        fi
 
         # Show content preview (first 200 characters)
         if [ -n "$content" ] && [ "$content" != "null" ]; then

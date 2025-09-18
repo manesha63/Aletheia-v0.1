@@ -765,9 +765,63 @@ class LegalTopicClassifier:
     ]
 
     @classmethod
+    def _is_metadata_only_content(cls, content: str) -> bool:
+        """Check if content is metadata-only and should be skipped for topic classification"""
+        if not content:
+            return True
+
+        # Skip JSON/dict API metadata from CourtListener (all formats)
+        content_clean = content.strip()
+        if (content_clean.startswith('{"resource_uri":') or
+            content_clean.startswith("{'resource_uri':") or
+            content_clean.startswith('{\n  "resource_uri":') or
+            content_clean.startswith("{\n  'resource_uri':")):
+            return True
+
+        # Additional check for JSON structure with resource_uri field
+        if (content_clean.startswith('{') and
+            '"resource_uri"' in content[:200] and
+            '"courtlistener.com"' in content[:500]):
+            return True
+
+        # Skip very short case summaries (but allow substantial ones)
+        if content.startswith('Case:') and len(content) < 500:
+            return True
+
+        # For other content, require minimum length for meaningful classification
+        if len(content) < 500:
+            return True
+
+        # Check for legal document indicators - if present, don't filter
+        legal_indicators = [
+            '<opinion', '<author', 'JUDGE', 'DISTRICT JUDGE', 'MAGISTRATE JUDGE',
+            'Federal Rule', 'U.S.C.', 'motion to dismiss', 'summary judgment',
+            'GRANTED', 'DENIED', 'ORDERED', 'IT IS HEREBY', 'Before the Court'
+        ]
+
+        content_upper = content.upper()
+        for indicator in legal_indicators:
+            if indicator.upper() in content_upper:
+                return False  # Don't filter legal documents
+
+        # For remaining content, check text density
+        # Skip if mostly structured data with little prose
+        lines = content.split('\n')
+        substantial_lines = [line for line in lines
+                           if len(line.strip()) > 30
+                           and not line.strip().startswith(('{', '"', '['))]
+
+        # Require at least 3 substantial prose lines for classification
+        return len(substantial_lines) < 3
+
+    @classmethod
     def extract_topics_from_content(cls, content: str) -> List[Dict[str, Any]]:
         """Extract legal topics from document content"""
         if not content:
+            return []
+
+        # Quality control: Skip metadata-only documents
+        if cls._is_metadata_only_content(content):
             return []
 
         # Convert to lowercase for case-insensitive matching

@@ -11,7 +11,7 @@ RUN apk add --no-cache --virtual .build-deps \
     npm
 
 # Install global tools and types needed for custom node builds
-RUN npm install -g typescript gulp-cli @types/node n8n-workflow pg uuid @elastic/elasticsearch @types/pg @types/uuid
+RUN npm install -g typescript gulp-cli @types/node n8n-workflow pg uuid @types/pg @types/uuid
 
 # Install runtime tools we need
 RUN apk add --no-cache \

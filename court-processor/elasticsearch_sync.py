@@ -202,11 +202,12 @@ class ElasticsearchSync:
         try:
             cursor = self.db_conn.cursor(cursor_factory=RealDictCursor)
 
-            # Build query
+            # Build query - only sync documents with actual content
             query = """
                 SELECT id, case_number, case_name, document_type, file_path,
                        content, metadata, processed, created_at, updated_at
                 FROM court_documents
+                WHERE content IS NOT NULL AND content != ''
             """
 
             params = []
@@ -214,7 +215,7 @@ class ElasticsearchSync:
             # Add incremental filter if needed
             if incremental:
                 # TODO: Implement incremental sync based on last sync timestamp
-                query += " WHERE updated_at > %s"
+                query += " AND updated_at > %s"
                 # For now, we'll implement this in a future version
                 pass
 

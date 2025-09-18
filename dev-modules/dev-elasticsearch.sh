@@ -19,17 +19,17 @@ ES_SYNC_SCRIPT="court-processor/elasticsearch_sync.py"
 ES_HOST="http://localhost:9200"
 ES_INDEX="court-documents"
 
-# Database configuration from environment
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-8200}"
-DB_NAME="${DB_NAME:-aletheia}"
-DB_USER="${DB_USER:-aletheia}"
-
-# Load environment variables from .env if available
+# Load environment variables from .env if available first
 if [ -f ".env" ]; then
     # Load DB and ES configuration
     export $(grep -v '^#' .env | grep -E '(DB_|ELASTICSEARCH_|EMBEDDING_)' | xargs)
 fi
+
+# Database configuration - override Docker values for host-based access
+DB_HOST="localhost"  # Always use localhost for dev CLI access
+DB_PORT="${POSTGRES_PORT:-8200}"  # Use the external port
+DB_NAME="${DB_NAME:-aletheia}"
+DB_USER="${DB_USER:-aletheia}"
 
 # Main Elasticsearch command handler
 handle_es_command() {
@@ -347,17 +347,19 @@ es_display_search_results() {
         return 0
     fi
 
-    # Display each result
+    # Display each result using proper JSON processing
     local count=0
-    echo "$response" | jq -r '.hits.hits[]' 2>/dev/null | while read -r hit; do
+    local hits_count=$(echo "$response" | jq -r '.hits.hits | length' 2>/dev/null)
+
+    for ((i=0; i<hits_count; i++)); do
         count=$((count + 1))
 
-        local doc_id=$(echo "$hit" | jq -r '._source.id // "N/A"' 2>/dev/null)
-        local case_number=$(echo "$hit" | jq -r '._source.case_number // "N/A"' 2>/dev/null)
-        local case_name=$(echo "$hit" | jq -r '._source.case_name // "N/A"' 2>/dev/null)
-        local doc_type=$(echo "$hit" | jq -r '._source.document_type // "N/A"' 2>/dev/null)
-        local score=$(echo "$hit" | jq -r '._score // "N/A"' 2>/dev/null)
-        local content=$(echo "$hit" | jq -r '._source.content // ""' 2>/dev/null)
+        local doc_id=$(echo "$response" | jq -r ".hits.hits[$i]._source.id // \"N/A\"" 2>/dev/null)
+        local case_number=$(echo "$response" | jq -r ".hits.hits[$i]._source.case_number // \"N/A\"" 2>/dev/null)
+        local case_name=$(echo "$response" | jq -r ".hits.hits[$i]._source.case_name // \"N/A\"" 2>/dev/null)
+        local doc_type=$(echo "$response" | jq -r ".hits.hits[$i]._source.document_type // \"N/A\"" 2>/dev/null)
+        local score=$(echo "$response" | jq -r ".hits.hits[$i]._score // \"N/A\"" 2>/dev/null)
+        local content=$(echo "$response" | jq -r ".hits.hits[$i]._source.content // \"\"" 2>/dev/null)
 
         echo -e "${CYAN}[$count] Document ID: $doc_id (Score: $score)${NC}"
         echo -e "${BLUE}Case: $case_number${NC}"

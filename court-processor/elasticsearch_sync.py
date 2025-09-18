@@ -199,6 +199,34 @@ class ElasticsearchSync:
                         },
                         "court_id": {
                             "type": "keyword"
+                        },
+                        "legal_citations": {
+                            "type": "nested",
+                            "properties": {
+                                "citation": {"type": "keyword"},
+                                "type": {"type": "keyword"},
+                                "confidence": {"type": "float"}
+                            }
+                        },
+                        "case_dispositions": {
+                            "type": "nested",
+                            "properties": {
+                                "disposition": {"type": "keyword"},
+                                "type": {"type": "keyword"},
+                                "confidence": {"type": "float"}
+                            }
+                        },
+                        "motion_rulings": {
+                            "type": "keyword"
+                        },
+                        "appeal_outcomes": {
+                            "type": "keyword"
+                        },
+                        "usc_citations": {
+                            "type": "keyword"
+                        },
+                        "federal_rules": {
+                            "type": "keyword"
                         }
                     }
                 }
@@ -223,12 +251,13 @@ class ElasticsearchSync:
         try:
             cursor = self.db_conn.cursor(cursor_factory=RealDictCursor)
 
-            # Build query - only sync documents with actual content
+            # Build query - only sync documents with actual content, excluding low-value docs
             query = """
                 SELECT id, case_number, case_name, document_type, file_path,
                        content, metadata, processed, created_at, updated_at
                 FROM court_documents
                 WHERE content IS NOT NULL AND content != ''
+                AND content NOT ILIKE '%paid tier access%'
             """
 
             params = []
@@ -323,7 +352,14 @@ class ElasticsearchSync:
                 'court_id': metadata.get('court_id'),
                 'filing_date': metadata.get('filing_date'),
                 'decision_date': metadata.get('decision_date'),
-                'document_date': metadata.get('document_date')
+                'document_date': metadata.get('document_date'),
+                # Structured legal metadata
+                'legal_citations': metadata.get('legal_citations'),
+                'case_dispositions': metadata.get('case_dispositions'),
+                'motion_rulings': [d['disposition'] for d in metadata.get('motion_rulings', [])],
+                'appeal_outcomes': [d['disposition'] for d in metadata.get('appeal_outcomes', [])],
+                'usc_citations': [c['citation'] for c in metadata.get('usc_citations', [])],
+                'federal_rules': [c['citation'] for c in metadata.get('federal_rules', [])]
             }
 
             # Add embedding if generated successfully

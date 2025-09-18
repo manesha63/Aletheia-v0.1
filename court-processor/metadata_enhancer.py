@@ -404,6 +404,226 @@ class DocumentDateExtractor:
         return None
 
 
+class LegalCitationExtractor:
+    """Extract legal citations and references from document content"""
+
+    # Citation patterns for different legal reference types
+    CITATION_PATTERNS = [
+        # U.S. Code citations: 42 U.S.C. § 1983, 28 USC 1400
+        {
+            'pattern': r'(\d+\s+U\.?S\.?C\.?\s*§?\s*\d+(?:\([^)]+\))?)',
+            'type': 'usc',
+            'confidence': 0.9
+        },
+
+        # Federal Register citations: Fed. R. Civ. P. 12(b)(6)
+        {
+            'pattern': r'(Fed\.?\s*R\.?\s*(?:Civ\.?\s*P\.?|Crim\.?\s*P\.?|App\.?\s*P\.?|Evid\.?)\s*\d+[a-z]?(?:\([^)]+\))?)',
+            'type': 'federal_rules',
+            'confidence': 0.9
+        },
+
+        # Federal Reporter citations: 871 F.3d 1355, 536 F.2d 123
+        {
+            'pattern': r'(\d+\s+F\.?\d*d?\s+\d+)',
+            'type': 'federal_reporter',
+            'confidence': 0.8
+        },
+
+        # U.S. Supreme Court citations: 536 U.S. 304
+        {
+            'pattern': r'(\d+\s+U\.S\.?\s+\d+)',
+            'type': 'supreme_court',
+            'confidence': 0.9
+        },
+
+        # Code of Federal Regulations: 29 C.F.R. § 825.100
+        {
+            'pattern': r'(\d+\s+C\.F\.R\.?\s*§?\s*\d+(?:\.\d+)*)',
+            'type': 'cfr',
+            'confidence': 0.8
+        }
+    ]
+
+    @classmethod
+    def extract_citations_from_content(cls, content: str) -> List[Dict[str, Any]]:
+        """Extract all legal citations from document content"""
+        if not content:
+            return []
+
+        # Search in first 10000 characters where citations are most relevant
+        content_search = content[:10000]
+        extracted_citations = []
+
+        for pattern_info in cls.CITATION_PATTERNS:
+            pattern = pattern_info['pattern']
+            citation_type = pattern_info['type']
+            confidence = pattern_info['confidence']
+
+            matches = re.findall(pattern, content_search, re.IGNORECASE)
+
+            for match in matches:
+                # Clean up the citation
+                clean_citation = re.sub(r'\s+', ' ', match).strip()
+
+                extracted_citations.append({
+                    'citation': clean_citation,
+                    'type': citation_type,
+                    'confidence': confidence
+                })
+
+        # Remove duplicates while preserving highest confidence
+        unique_citations = {}
+        for citation_info in extracted_citations:
+            key = f"{citation_info['citation']}_{citation_info['type']}"
+            if key not in unique_citations or citation_info['confidence'] > unique_citations[key]['confidence']:
+                unique_citations[key] = citation_info
+
+        return list(unique_citations.values())
+
+    @classmethod
+    def extract_comprehensive_citation_info(cls, content: str = None,
+                                          existing_metadata: Dict = None) -> Optional[Dict]:
+        """Extract comprehensive citation information"""
+
+        # Check existing metadata first
+        if existing_metadata and existing_metadata.get('legal_citations'):
+            return {
+                'citations_found': True,
+                'source': 'existing_metadata',
+                'confidence': 1.0
+            }
+
+        # Extract from content
+        if content:
+            extracted_citations = cls.extract_citations_from_content(content)
+
+            if extracted_citations:
+                # Organize by type
+                citation_info = {
+                    'usc_citations': [c for c in extracted_citations if c['type'] == 'usc'],
+                    'federal_rules': [c for c in extracted_citations if c['type'] == 'federal_rules'],
+                    'case_citations': [c for c in extracted_citations if c['type'] in ['federal_reporter', 'supreme_court']],
+                    'cfr_citations': [c for c in extracted_citations if c['type'] == 'cfr'],
+                    'all_citations': extracted_citations
+                }
+
+                return {
+                    'citations_found': True,
+                    'source': 'content_extraction',
+                    'confidence': max(c['confidence'] for c in extracted_citations),
+                    'extracted_info': citation_info
+                }
+
+        return None
+
+
+class CaseDispositionExtractor:
+    """Extract case dispositions and rulings from document content"""
+
+    # Disposition patterns for different types of rulings
+    DISPOSITION_PATTERNS = [
+        # Motion dispositions
+        {
+            'pattern': r'\b(GRANTED|DENIED|DISMISSED)\b',
+            'type': 'motion_disposition',
+            'confidence': 0.9
+        },
+
+        # Appeal dispositions
+        {
+            'pattern': r'\b(AFFIRMED|REVERSED|VACATED|REMANDED)\b',
+            'type': 'appeal_disposition',
+            'confidence': 0.9
+        },
+
+        # Case closures
+        {
+            'pattern': r'\b(CLOSED|TERMINATED|STAYED)\b',
+            'type': 'case_status',
+            'confidence': 0.8
+        },
+
+        # Injunction types
+        {
+            'pattern': r'\b(ENJOINED|RESTRAINED|PRELIMINARY INJUNCTION|PERMANENT INJUNCTION)\b',
+            'type': 'injunction',
+            'confidence': 0.8
+        }
+    ]
+
+    @classmethod
+    def extract_dispositions_from_content(cls, content: str) -> List[Dict[str, Any]]:
+        """Extract all case dispositions from document content"""
+        if not content:
+            return []
+
+        # Search in first 5000 characters where dispositions are typically announced
+        content_search = content[:5000]
+        extracted_dispositions = []
+
+        for pattern_info in cls.DISPOSITION_PATTERNS:
+            pattern = pattern_info['pattern']
+            disposition_type = pattern_info['type']
+            confidence = pattern_info['confidence']
+
+            matches = re.findall(pattern, content_search, re.IGNORECASE)
+
+            for match in matches:
+                disposition = match.upper().strip()
+
+                extracted_dispositions.append({
+                    'disposition': disposition,
+                    'type': disposition_type,
+                    'confidence': confidence
+                })
+
+        # Remove duplicates while preserving highest confidence
+        unique_dispositions = {}
+        for disp_info in extracted_dispositions:
+            key = f"{disp_info['disposition']}_{disp_info['type']}"
+            if key not in unique_dispositions or disp_info['confidence'] > unique_dispositions[key]['confidence']:
+                unique_dispositions[key] = disp_info
+
+        return list(unique_dispositions.values())
+
+    @classmethod
+    def extract_comprehensive_disposition_info(cls, content: str = None,
+                                             existing_metadata: Dict = None) -> Optional[Dict]:
+        """Extract comprehensive disposition information"""
+
+        # Check existing metadata first
+        if existing_metadata and existing_metadata.get('case_dispositions'):
+            return {
+                'dispositions_found': True,
+                'source': 'existing_metadata',
+                'confidence': 1.0
+            }
+
+        # Extract from content
+        if content:
+            extracted_dispositions = cls.extract_dispositions_from_content(content)
+
+            if extracted_dispositions:
+                # Organize by type
+                disposition_info = {
+                    'motion_rulings': [d for d in extracted_dispositions if d['type'] == 'motion_disposition'],
+                    'appeal_outcomes': [d for d in extracted_dispositions if d['type'] == 'appeal_disposition'],
+                    'case_status': [d for d in extracted_dispositions if d['type'] == 'case_status'],
+                    'injunctions': [d for d in extracted_dispositions if d['type'] == 'injunction'],
+                    'all_dispositions': extracted_dispositions
+                }
+
+                return {
+                    'dispositions_found': True,
+                    'source': 'content_extraction',
+                    'confidence': max(d['confidence'] for d in extracted_dispositions),
+                    'extracted_info': disposition_info
+                }
+
+        return None
+
+
 class MetadataEnhancer:
     """Main service for enhancing document metadata"""
 
@@ -432,6 +652,8 @@ class MetadataEnhancer:
             'judges_extracted': 0,
             'courts_extracted': 0,
             'dates_extracted': 0,
+            'citations_extracted': 0,
+            'dispositions_extracted': 0,
             'metadata_updates': 0,
             'elasticsearch_updates': 0,
             'errors': []
@@ -471,10 +693,13 @@ class MetadataEnhancer:
                 SELECT id, case_number, case_name, document_type, content, metadata
                 FROM court_documents
                 WHERE content IS NOT NULL AND content != ''
+                AND content NOT ILIKE '%paid tier access%'
                 AND (
                     metadata IS NULL
                     OR metadata->>'judge_name' IS NULL
                     OR metadata->>'court_id' IS NULL
+                    OR NOT (metadata::jsonb ? 'legal_citations')
+                    OR NOT (metadata::jsonb ? 'case_dispositions')
                 )
                 ORDER BY id
             """
@@ -590,6 +815,64 @@ class MetadataEnhancer:
                             self.stats['dates_extracted'] = 0
                         self.stats['dates_extracted'] += len(extracted_info.get('all_dates', []))
 
+            # Extract legal citations if missing
+            if not enhanced_metadata.get('legal_citations'):
+                citation_info = LegalCitationExtractor.extract_comprehensive_citation_info(
+                    content=content,
+                    existing_metadata=enhanced_metadata
+                )
+
+                if citation_info and citation_info.get('citations_found'):
+                    if citation_info['source'] == 'content_extraction':
+                        extracted_info = citation_info['extracted_info']
+                        enhanced_metadata['legal_citations'] = extracted_info['all_citations']
+
+                        # Store organized citation types
+                        if extracted_info.get('usc_citations'):
+                            enhanced_metadata['usc_citations'] = extracted_info['usc_citations']
+                        if extracted_info.get('federal_rules'):
+                            enhanced_metadata['federal_rules'] = extracted_info['federal_rules']
+                        if extracted_info.get('case_citations'):
+                            enhanced_metadata['case_citations'] = extracted_info['case_citations']
+                        if extracted_info.get('cfr_citations'):
+                            enhanced_metadata['cfr_citations'] = extracted_info['cfr_citations']
+
+                        extraction_sources['citations_source'] = 'content_extraction'
+                        extraction_sources['citations_confidence'] = citation_info['confidence']
+
+                        # Update stats
+                        if not hasattr(self.stats, 'citations_extracted'):
+                            self.stats['citations_extracted'] = 0
+                        self.stats['citations_extracted'] += len(extracted_info.get('all_citations', []))
+
+            # Extract case dispositions if missing
+            if not enhanced_metadata.get('case_dispositions'):
+                disposition_info = CaseDispositionExtractor.extract_comprehensive_disposition_info(
+                    content=content,
+                    existing_metadata=enhanced_metadata
+                )
+
+                if disposition_info and disposition_info.get('dispositions_found'):
+                    if disposition_info['source'] == 'content_extraction':
+                        extracted_info = disposition_info['extracted_info']
+                        enhanced_metadata['case_dispositions'] = extracted_info['all_dispositions']
+
+                        # Store organized disposition types
+                        if extracted_info.get('motion_rulings'):
+                            enhanced_metadata['motion_rulings'] = extracted_info['motion_rulings']
+                        if extracted_info.get('appeal_outcomes'):
+                            enhanced_metadata['appeal_outcomes'] = extracted_info['appeal_outcomes']
+                        if extracted_info.get('case_status'):
+                            enhanced_metadata['case_status'] = extracted_info['case_status']
+
+                        extraction_sources['dispositions_source'] = 'content_extraction'
+                        extraction_sources['dispositions_confidence'] = disposition_info['confidence']
+
+                        # Update stats
+                        if not hasattr(self.stats, 'dispositions_extracted'):
+                            self.stats['dispositions_extracted'] = 0
+                        self.stats['dispositions_extracted'] += len(extracted_info.get('all_dispositions', []))
+
             # Add extraction metadata
             if extraction_sources:
                 enhanced_metadata['enhancement_info'] = {
@@ -672,6 +955,8 @@ class MetadataEnhancer:
                 'judges_extracted': 0,
                 'courts_extracted': 0,
                 'dates_extracted': 0,
+                'citations_extracted': 0,
+                'dispositions_extracted': 0,
                 'metadata_updates': 0,
                 'elasticsearch_updates': 0,
                 'errors': []
@@ -725,6 +1010,8 @@ class MetadataEnhancer:
         logger.info(f"Judges extracted: {self.stats['judges_extracted']}")
         logger.info(f"Courts extracted: {self.stats['courts_extracted']}")
         logger.info(f"Dates extracted: {self.stats['dates_extracted']}")
+        logger.info(f"Citations extracted: {self.stats['citations_extracted']}")
+        logger.info(f"Dispositions extracted: {self.stats['dispositions_extracted']}")
         logger.info(f"Database updates: {self.stats['metadata_updates']}")
         logger.info(f"Elasticsearch updates: {self.stats['elasticsearch_updates']}")
 

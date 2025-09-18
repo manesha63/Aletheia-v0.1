@@ -382,7 +382,7 @@ async def get_document_simple(document_id: int):
 @app.get("/search")
 async def search_simple(
     judge: Optional[str] = None,
-    type: str = "020lead",
+    type: str = "all",
     min_length: int = 5000,
     limit: int = Query(default=10, le=200),  # Increased for bulk retrieval
     offset: int = Query(default=0, ge=0)

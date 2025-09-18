@@ -72,7 +72,6 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
       const source = getDocumentSource('court');
       const response = await source.searchDocuments({
         category: judgeName,
-        type: '020lead',
         limit: 50,
         min_length: 5000
       });

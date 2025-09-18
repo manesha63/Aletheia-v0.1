@@ -624,6 +624,225 @@ class CaseDispositionExtractor:
         return None
 
 
+class LegalTopicClassifier:
+    """Extract and classify legal topics from document content"""
+
+    # Legal topic classification patterns
+    TOPIC_PATTERNS = [
+        # Constitutional Law
+        {
+            'keywords': ['constitutional', 'first amendment', 'fourth amendment', 'fifth amendment',
+                        'fourteenth amendment', 'due process', 'equal protection', 'bill of rights',
+                        'constitutional challenge', 'constitutional violation'],
+            'topic': 'Constitutional Law',
+            'confidence': 0.9
+        },
+
+        # Contract Law
+        {
+            'keywords': ['contract', 'breach of contract', 'contractual obligation', 'agreement',
+                        'warranty', 'breach of warranty', 'consideration', 'offer and acceptance',
+                        'contractual dispute', 'breach of agreement'],
+            'topic': 'Contract Law',
+            'confidence': 0.8
+        },
+
+        # Intellectual Property
+        {
+            'keywords': ['patent', 'copyright', 'trademark', 'trade secret', 'infringement',
+                        'patent infringement', 'copyright infringement', 'trademark infringement',
+                        'intellectual property', 'DMCA', 'fair use'],
+            'topic': 'Intellectual Property',
+            'confidence': 0.9
+        },
+
+        # Criminal Procedure
+        {
+            'keywords': ['criminal procedure', 'search and seizure', 'miranda rights', 'arrest',
+                        'probable cause', 'warrant', 'suppression', 'exclusionary rule',
+                        'criminal defendant', 'prosecution'],
+            'topic': 'Criminal Procedure',
+            'confidence': 0.8
+        },
+
+        # Employment Law
+        {
+            'keywords': ['employment', 'discrimination', 'wrongful termination', 'harassment',
+                        'Title VII', 'ADA', 'FMLA', 'wage and hour', 'overtime',
+                        'employment contract', 'workplace'],
+            'topic': 'Employment Law',
+            'confidence': 0.8
+        },
+
+        # Civil Rights
+        {
+            'keywords': ['civil rights', 'section 1983', '42 U.S.C. § 1983', 'qualified immunity',
+                        'civil rights violation', 'discrimination', 'equal protection',
+                        'civil liberties', 'constitutional rights'],
+            'topic': 'Civil Rights',
+            'confidence': 0.9
+        },
+
+        # Tax Law
+        {
+            'keywords': ['tax', 'taxation', 'IRS', 'Internal Revenue Service', 'tax liability',
+                        'tax evasion', 'tax code', 'deduction', 'exemption', 'tax return'],
+            'topic': 'Tax Law',
+            'confidence': 0.8
+        },
+
+        # Securities Law
+        {
+            'keywords': ['securities', 'SEC', 'Securities and Exchange Commission', 'fraud',
+                        'securities fraud', 'insider trading', 'disclosure', 'registration',
+                        'investment', 'stock'],
+            'topic': 'Securities Law',
+            'confidence': 0.9
+        },
+
+        # Immigration Law
+        {
+            'keywords': ['immigration', 'deportation', 'asylum', 'visa', 'green card',
+                        'naturalization', 'ICE', 'immigration court', 'removal proceedings',
+                        'immigration status'],
+            'topic': 'Immigration Law',
+            'confidence': 0.8
+        },
+
+        # Environmental Law
+        {
+            'keywords': ['environmental', 'EPA', 'Clean Air Act', 'Clean Water Act', 'CERCLA',
+                        'environmental protection', 'pollution', 'contamination', 'NEPA',
+                        'environmental impact'],
+            'topic': 'Environmental Law',
+            'confidence': 0.8
+        },
+
+        # Antitrust Law
+        {
+            'keywords': ['antitrust', 'monopoly', 'competition', 'Sherman Act', 'Clayton Act',
+                        'price fixing', 'market manipulation', 'restraint of trade',
+                        'competitive harm', 'market power'],
+            'topic': 'Antitrust Law',
+            'confidence': 0.9
+        },
+
+        # Corporate Law
+        {
+            'keywords': ['corporate', 'corporation', 'shareholder', 'board of directors',
+                        'fiduciary duty', 'merger', 'acquisition', 'corporate governance',
+                        'business judgment rule', 'derivative suit'],
+            'topic': 'Corporate Law',
+            'confidence': 0.8
+        },
+
+        # Bankruptcy Law
+        {
+            'keywords': ['bankruptcy', 'Chapter 7', 'Chapter 11', 'Chapter 13', 'debtor',
+                        'creditor', 'discharge', 'liquidation', 'reorganization',
+                        'automatic stay'],
+            'topic': 'Bankruptcy Law',
+            'confidence': 0.9
+        },
+
+        # Administrative Law
+        {
+            'keywords': ['administrative law', 'agency action', 'rulemaking', 'APA',
+                        'Administrative Procedure Act', 'judicial review', 'arbitrary and capricious',
+                        'substantial evidence', 'agency decision'],
+            'topic': 'Administrative Law',
+            'confidence': 0.8
+        },
+
+        # Evidence Law
+        {
+            'keywords': ['evidence', 'Federal Rules of Evidence', 'hearsay', 'privilege',
+                        'authentication', 'best evidence rule', 'expert testimony',
+                        'admissibility', 'relevance'],
+            'topic': 'Evidence Law',
+            'confidence': 0.8
+        }
+    ]
+
+    @classmethod
+    def extract_topics_from_content(cls, content: str) -> List[Dict[str, Any]]:
+        """Extract legal topics from document content"""
+        if not content:
+            return []
+
+        # Convert to lowercase for case-insensitive matching
+        content_lower = content.lower()
+        extracted_topics = []
+
+        for topic_info in cls.TOPIC_PATTERNS:
+            keywords = topic_info['keywords']
+            topic = topic_info['topic']
+            base_confidence = topic_info['confidence']
+
+            # Count keyword matches
+            keyword_matches = []
+            for keyword in keywords:
+                if keyword.lower() in content_lower:
+                    keyword_matches.append(keyword)
+
+            # Require at least 2 keyword matches for topic assignment
+            if len(keyword_matches) >= 2:
+                # Adjust confidence based on number of matches
+                confidence = min(base_confidence + (len(keyword_matches) - 2) * 0.05, 0.95)
+
+                extracted_topics.append({
+                    'topic': topic,
+                    'confidence': confidence,
+                    'matched_keywords': keyword_matches[:5]  # Limit to top 5 matches
+                })
+
+        # Sort by confidence and remove duplicates
+        extracted_topics.sort(key=lambda x: x['confidence'], reverse=True)
+
+        # Return top 3 most confident topics
+        return extracted_topics[:3]
+
+    @classmethod
+    def extract_comprehensive_topic_info(cls, content: str = None,
+                                       existing_metadata: Dict = None) -> Optional[Dict]:
+        """Extract comprehensive legal topic information"""
+
+        # Check existing metadata first
+        if existing_metadata and existing_metadata.get('legal_topics'):
+            return {
+                'topics_found': True,
+                'source': 'existing_metadata',
+                'confidence': 1.0,
+                'topic_count': len(existing_metadata['legal_topics'])
+            }
+
+        # Extract from content
+        if content:
+            extracted_topics = cls.extract_topics_from_content(content)
+
+            if extracted_topics:
+                # Organize topics by confidence level
+                high_confidence = [t for t in extracted_topics if t['confidence'] >= 0.85]
+                medium_confidence = [t for t in extracted_topics if 0.7 <= t['confidence'] < 0.85]
+                low_confidence = [t for t in extracted_topics if t['confidence'] < 0.7]
+
+                topic_info = {
+                    'all_topics': extracted_topics,
+                    'primary_topics': high_confidence,
+                    'secondary_topics': medium_confidence,
+                    'potential_topics': low_confidence
+                }
+
+                return {
+                    'topics_found': True,
+                    'source': 'content_extraction',
+                    'confidence': max(t['confidence'] for t in extracted_topics),
+                    'extracted_info': topic_info
+                }
+
+        return None
+
+
 class MetadataEnhancer:
     """Main service for enhancing document metadata"""
 
@@ -654,6 +873,7 @@ class MetadataEnhancer:
             'dates_extracted': 0,
             'citations_extracted': 0,
             'dispositions_extracted': 0,
+            'topics_extracted': 0,
             'metadata_updates': 0,
             'elasticsearch_updates': 0,
             'errors': []
@@ -873,6 +1093,34 @@ class MetadataEnhancer:
                             self.stats['dispositions_extracted'] = 0
                         self.stats['dispositions_extracted'] += len(extracted_info.get('all_dispositions', []))
 
+            # Extract legal topics if missing
+            if not enhanced_metadata.get('legal_topics'):
+                topic_info = LegalTopicClassifier.extract_comprehensive_topic_info(
+                    content=content,
+                    existing_metadata=enhanced_metadata
+                )
+
+                if topic_info and topic_info.get('topics_found'):
+                    if topic_info['source'] == 'content_extraction':
+                        extracted_info = topic_info['extracted_info']
+                        enhanced_metadata['legal_topics'] = extracted_info['all_topics']
+
+                        # Store organized topic categories
+                        if extracted_info.get('primary_topics'):
+                            enhanced_metadata['primary_topics'] = extracted_info['primary_topics']
+                        if extracted_info.get('secondary_topics'):
+                            enhanced_metadata['secondary_topics'] = extracted_info['secondary_topics']
+                        if extracted_info.get('potential_topics'):
+                            enhanced_metadata['potential_topics'] = extracted_info['potential_topics']
+
+                        extraction_sources['topics_source'] = 'content_extraction'
+                        extraction_sources['topics_confidence'] = topic_info['confidence']
+
+                        # Update stats
+                        if not hasattr(self.stats, 'topics_extracted'):
+                            self.stats['topics_extracted'] = 0
+                        self.stats['topics_extracted'] += len(extracted_info.get('all_topics', []))
+
             # Add extraction metadata
             if extraction_sources:
                 enhanced_metadata['enhancement_info'] = {
@@ -1012,6 +1260,7 @@ class MetadataEnhancer:
         logger.info(f"Dates extracted: {self.stats['dates_extracted']}")
         logger.info(f"Citations extracted: {self.stats['citations_extracted']}")
         logger.info(f"Dispositions extracted: {self.stats['dispositions_extracted']}")
+        logger.info(f"Topics extracted: {self.stats['topics_extracted']}")
         logger.info(f"Database updates: {self.stats['metadata_updates']}")
         logger.info(f"Elasticsearch updates: {self.stats['elasticsearch_updates']}")
 

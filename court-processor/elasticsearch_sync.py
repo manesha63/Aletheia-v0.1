@@ -216,6 +216,30 @@ class ElasticsearchSync:
                                 "confidence": {"type": "float"}
                             }
                         },
+                        "legal_topics": {
+                            "type": "nested",
+                            "properties": {
+                                "topic": {"type": "keyword"},
+                                "confidence": {"type": "float"},
+                                "matched_keywords": {"type": "keyword"}
+                            }
+                        },
+                        "primary_topics": {
+                            "type": "nested",
+                            "properties": {
+                                "topic": {"type": "keyword"},
+                                "confidence": {"type": "float"},
+                                "matched_keywords": {"type": "keyword"}
+                            }
+                        },
+                        "secondary_topics": {
+                            "type": "nested",
+                            "properties": {
+                                "topic": {"type": "keyword"},
+                                "confidence": {"type": "float"},
+                                "matched_keywords": {"type": "keyword"}
+                            }
+                        },
                         "motion_rulings": {
                             "type": "keyword"
                         },
@@ -356,6 +380,9 @@ class ElasticsearchSync:
                 # Structured legal metadata
                 'legal_citations': metadata.get('legal_citations'),
                 'case_dispositions': metadata.get('case_dispositions'),
+                'legal_topics': metadata.get('legal_topics'),
+                'primary_topics': metadata.get('primary_topics'),
+                'secondary_topics': metadata.get('secondary_topics'),
                 'motion_rulings': [d['disposition'] for d in metadata.get('motion_rulings', [])],
                 'appeal_outcomes': [d['disposition'] for d in metadata.get('appeal_outcomes', [])],
                 'usc_citations': [c['citation'] for c in metadata.get('usc_citations', [])],

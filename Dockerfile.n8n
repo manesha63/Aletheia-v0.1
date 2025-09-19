@@ -29,7 +29,6 @@ COPY ./n8n/custom-nodes/n8n-nodes-haystack /usr/local/lib/node_modules/n8n-nodes
 COPY ./n8n/custom-nodes/n8n-nodes-citationchecker /usr/local/lib/node_modules/n8n-nodes-citationchecker
 COPY ./n8n/custom-nodes/n8n-nodes-deepseek /usr/local/lib/node_modules/n8n-nodes-deepseek
 COPY ./n8n/custom-nodes/n8n-nodes-yake /usr/local/lib/node_modules/n8n-nodes-yake
-COPY ./n8n/custom-nodes/n8n-nodes-unstructured /usr/local/lib/node_modules/n8n-nodes-unstructured
 COPY ./n8n/custom-nodes/n8n-nodes-citation-gen /usr/local/lib/node_modules/n8n-nodes-citation-gen
 # BitNet node archived - removed from build due to dependency issues
 
@@ -67,7 +66,6 @@ RUN cp -r /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization /data/
     cp -r /usr/local/lib/node_modules/n8n-nodes-citationchecker /data/.n8n/custom/ && \
     cp -r /usr/local/lib/node_modules/n8n-nodes-deepseek /data/.n8n/custom/ && \
     cp -r /usr/local/lib/node_modules/n8n-nodes-yake /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-unstructured /data/.n8n/custom/ && \
     cp -r /usr/local/lib/node_modules/n8n-nodes-citation-gen /data/.n8n/custom/
 
 # Set proper ownership for all n8n directories

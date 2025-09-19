@@ -61,13 +61,16 @@ RUN apk del .build-deps
 # n8n v1.100.1 expects custom nodes in the user folder
 RUN mkdir -p /data/.n8n/custom
 
-# Copy the complete node packages with correct structure
-RUN cp -r /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-haystack /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-citationchecker /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-deepseek /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-yake /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-citation-gen /data/.n8n/custom/
+# Copy only essential files for n8n custom nodes (not entire node_modules)
+RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \
+        node_name=$(basename "$node_dir"); \
+        echo "Copying essential files for $node_name..."; \
+        mkdir -p "/data/.n8n/custom/$node_name"; \
+        cp "$node_dir/package.json" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+        cp -r "$node_dir/dist" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+        cp -r "$node_dir/nodes" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+        cp -r "$node_dir/credentials" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+    done
 
 # Set proper ownership for all n8n directories
 RUN chown -R node:node /data

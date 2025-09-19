@@ -13,6 +13,10 @@ from collections import defaultdict, Counter
 import networkx as nx
 import numpy as np
 from functools import lru_cache
+from pydantic import ValidationError
+
+# Import validation models
+from .validation import RecommendationRequest, validate_document_id, validate_confidence_score, validate_positive_integer
 
 logger = logging.getLogger(__name__)
 
@@ -57,26 +61,30 @@ class RelatedCaseService:
         self._graph_built = False
 
     async def build_recommendation_graphs(self, force_rebuild: bool = False) -> None:
-        """Build citation and topic graphs from all documents"""
+        """Build citation and topic graphs from all documents using memory-efficient batch processing"""
         if self._graph_built and not force_rebuild:
             return
 
-        logger.info("Building recommendation graphs from Elasticsearch...")
+        logger.info("Building recommendation graphs from Elasticsearch using batch processing...")
 
-        # Fetch all documents with relevant fields
-        documents = await self._fetch_all_documents()
+        # Clear existing graphs
+        self.citation_graph.clear()
+        self.topic_graph.clear()
 
-        # Build citation network
-        self._build_citation_graph(documents)
+        # Process documents in batches to avoid memory exhaustion
+        async def process_batch(documents):
+            # Build citation network incrementally
+            self._build_citation_graph_batch(documents)
+            # Build topic co-occurrence graph incrementally
+            self._build_topic_graph_batch(documents)
 
-        # Build topic co-occurrence graph
-        self._build_topic_graph(documents)
+        await self._process_documents_in_batches(process_batch, batch_size=100)
 
-        # Compute authority scores
+        # Compute authority scores after all batches processed
         self._compute_authority_scores()
 
         self._graph_built = True
-        logger.info(f"Graphs built: {self.citation_graph.number_of_nodes()} citation nodes, "
+        logger.info(f"Graphs built in batches: {self.citation_graph.number_of_nodes()} citation nodes, "
                    f"{self.topic_graph.number_of_nodes()} topic nodes")
 
     async def get_related_cases(
@@ -96,6 +104,24 @@ class RelatedCaseService:
         - Authority rankings
         - Computational metadata for LLM reasoning
         """
+
+        # Validate inputs using Pydantic
+        try:
+            request = RecommendationRequest(
+                document_id=document_id,
+                max_recommendations=max_recommendations,
+                min_score_threshold=min_score_threshold,
+                include_full_graph=include_full_graph
+            )
+        except ValidationError as e:
+            logger.error(f"Invalid recommendation request: {e}")
+            raise ValueError(f"Invalid input parameters: {e}")
+
+        # Use validated values
+        document_id = request.document_id
+        max_recommendations = request.max_recommendations
+        min_score_threshold = request.min_score_threshold
+        include_full_graph = request.include_full_graph
 
         await self.build_recommendation_graphs()
 
@@ -146,10 +172,8 @@ class RelatedCaseService:
             }
         )
 
-    async def _fetch_all_documents(self, batch_size: int = 1000) -> List[Dict]:
-        """Fetch all documents with citation and topic data"""
-        documents = []
-
+    async def _process_documents_in_batches(self, batch_processor, batch_size: int = 100) -> None:
+        """Process documents in memory-efficient batches"""
         query = {
             "query": {"match_all": {}},
             "size": batch_size,
@@ -169,20 +193,38 @@ class RelatedCaseService:
 
         scroll_id = response["_scroll_id"]
         hits = response["hits"]["hits"]
+        total_processed = 0
 
-        while hits:
-            documents.extend([hit["_source"] for hit in hits])
+        try:
+            while hits:
+                # Process current batch
+                batch_documents = [hit["_source"] for hit in hits]
+                await batch_processor(batch_documents)
+                total_processed += len(batch_documents)
 
-            response = await self.es.scroll(
-                scroll_id=scroll_id,
-                scroll="5m"
-            )
-            hits = response["hits"]["hits"]
+                # Fetch next batch
+                response = await self.es.scroll(
+                    scroll_id=scroll_id,
+                    scroll="5m"
+                )
+                hits = response["hits"]["hits"]
 
-        # Clear scroll
-        await self.es.clear_scroll(scroll_id=scroll_id)
+        finally:
+            # Always clear scroll
+            await self.es.clear_scroll(scroll_id=scroll_id)
 
-        logger.info(f"Fetched {len(documents)} documents for analysis")
+        logger.info(f"Processed {total_processed} documents in batches")
+
+    async def _fetch_all_documents(self, batch_size: int = 1000) -> List[Dict]:
+        """Fetch all documents with citation and topic data - DEPRECATED: Use _process_documents_in_batches"""
+        logger.warning("_fetch_all_documents is deprecated. Use _process_documents_in_batches for better memory efficiency")
+
+        documents = []
+
+        async def collect_batch(batch):
+            documents.extend(batch)
+
+        await self._process_documents_in_batches(collect_batch, batch_size)
         return documents
 
     def _build_citation_graph(self, documents: List[Dict]) -> None:
@@ -243,6 +285,67 @@ class RelatedCaseService:
             for topic2, weight in connections.items():
                 if weight >= 2:  # Minimum co-occurrence threshold
                     self.topic_graph.add_edge(topic1, topic2, weight=weight)
+
+    def _build_citation_graph_batch(self, documents: List[Dict]) -> None:
+        """Build citation network graph incrementally from a batch of documents"""
+        for doc in documents:
+            doc_id = str(doc.get("id"))
+            self.citation_graph.add_node(doc_id, **{
+                "case_name": doc.get("case_name"),
+                "judge": doc.get("judge_name"),
+                "court": doc.get("court_id"),
+                "type": "document"
+            })
+
+            # Add citation edges
+            citations = doc.get("legal_citations", []) or []
+            for citation in citations:
+                if isinstance(citation, dict):
+                    cite_text = citation.get("citation", "")
+                    if cite_text:
+                        # Add citation as node
+                        if not self.citation_graph.has_node(cite_text):
+                            self.citation_graph.add_node(cite_text, type="citation")
+
+                        # Add edge
+                        self.citation_graph.add_edge(doc_id, cite_text, **{
+                            "type": "cites",
+                            "confidence": citation.get("confidence", 1.0)
+                        })
+
+    def _build_topic_graph_batch(self, documents: List[Dict]) -> None:
+        """Build topic co-occurrence graph incrementally from a batch of documents"""
+        topic_cooccurrence = defaultdict(lambda: defaultdict(int))
+
+        for doc in documents:
+            topics = doc.get("legal_topics", []) or []
+            valid_topics = []
+
+            for topic in topics:
+                if isinstance(topic, dict):
+                    topic_name = topic.get("topic")
+                    confidence = topic.get("confidence", 0.0)
+                    if topic_name and confidence >= 0.5:
+                        valid_topics.append(topic_name)
+
+            # Create topic co-occurrence within this document
+            for i, topic1 in enumerate(valid_topics):
+                self.topic_graph.add_node(topic1)
+                for topic2 in valid_topics[i+1:]:
+                    self.topic_graph.add_node(topic2)
+                    topic_cooccurrence[topic1][topic2] += 1
+                    topic_cooccurrence[topic2][topic1] += 1
+
+        # Add/update edges with weights
+        for topic1, connections in topic_cooccurrence.items():
+            for topic2, weight in connections.items():
+                if weight >= 1:  # Lower threshold for batch processing
+                    # If edge exists, update weight; otherwise create new edge
+                    if self.topic_graph.has_edge(topic1, topic2):
+                        current_weight = self.topic_graph[topic1][topic2].get('weight', 0)
+                        self.topic_graph[topic1][topic2]['weight'] = current_weight + weight
+                    else:
+                        self.topic_graph.add_edge(topic1, topic2, weight=weight)
 
     def _compute_authority_scores(self) -> None:
         """Compute citation authority scores using PageRank"""

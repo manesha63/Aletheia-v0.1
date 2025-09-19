@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from collections import defaultdict, Counter
 import networkx as nx
 import numpy as np
+from pydantic import ValidationError
+
+# Import validation models
+from .validation import CitationAnalysisRequest, validate_document_id
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +108,19 @@ class CitationAnalyticsService:
 
     async def get_document_citation_analysis(self, document_id: str) -> Dict[str, Any]:
         """Get detailed citation analysis for a specific document"""
+
+        # Validate input
+        try:
+            validated_id = validate_document_id(document_id)
+        except ValueError as e:
+            logger.error(f"Invalid document ID: {e}")
+            raise ValueError(f"Invalid document ID: {e}")
+
         if not self._graph_built:
             await self._build_graph()
 
+        # Use validated document ID
+        document_id = validated_id
         doc = await self._get_document(document_id)
         if not doc:
             return {}
@@ -481,10 +495,8 @@ class CitationAnalyticsService:
 
         return analysis
 
-    async def _fetch_all_documents(self, batch_size: int = 1000) -> List[Dict]:
-        """Fetch all documents with citation data"""
-        documents = []
-
+    async def _process_documents_in_batches(self, batch_processor, batch_size: int = 100) -> None:
+        """Process documents in memory-efficient batches"""
         query = {
             "query": {"match_all": {}},
             "size": batch_size,
@@ -503,20 +515,38 @@ class CitationAnalyticsService:
 
         scroll_id = response["_scroll_id"]
         hits = response["hits"]["hits"]
+        total_processed = 0
 
-        while hits:
-            documents.extend([hit["_source"] for hit in hits])
+        try:
+            while hits:
+                # Process current batch
+                batch_documents = [hit["_source"] for hit in hits]
+                await batch_processor(batch_documents)
+                total_processed += len(batch_documents)
 
-            response = await self.es.scroll(
-                scroll_id=scroll_id,
-                scroll="5m"
-            )
-            hits = response["hits"]["hits"]
+                # Fetch next batch
+                response = await self.es.scroll(
+                    scroll_id=scroll_id,
+                    scroll="5m"
+                )
+                hits = response["hits"]["hits"]
 
-        # Clear scroll
-        await self.es.clear_scroll(scroll_id=scroll_id)
+        finally:
+            # Always clear scroll
+            await self.es.clear_scroll(scroll_id=scroll_id)
 
-        logger.info(f"Fetched {len(documents)} documents for citation analysis")
+        logger.info(f"Processed {total_processed} documents in batches for citation analysis")
+
+    async def _fetch_all_documents(self, batch_size: int = 1000) -> List[Dict]:
+        """Fetch all documents with citation data - DEPRECATED: Use _process_documents_in_batches"""
+        logger.warning("_fetch_all_documents is deprecated. Use _process_documents_in_batches for better memory efficiency")
+
+        documents = []
+
+        async def collect_batch(batch):
+            documents.extend(batch)
+
+        await self._process_documents_in_batches(collect_batch, batch_size)
         return documents
 
     async def _get_document(self, document_id: str) -> Optional[Dict]:

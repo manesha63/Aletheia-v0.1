@@ -11,12 +11,25 @@ from dataclasses import dataclass
 from enum import Enum
 import logging
 import asyncio
+import concurrent.futures
 from functools import lru_cache
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
-# Global embedding model cache
+# Import validation models
+try:
+    from legal_analytics.validation import SearchRequest, validate_positive_integer
+except ImportError:
+    # Fallback validation functions if module not available
+    def validate_positive_integer(value, name, min_val=1, max_val=1000):
+        if not isinstance(value, int) or not min_val <= value <= max_val:
+            raise ValueError(f"{name} must be between {min_val} and {max_val}")
+        return value
+
+# Global embedding model cache and process pool
 _embedding_model = None
+_embedding_executor = None
 
 def get_embedding_model():
     """Get or initialize the sentence transformer model (lazy loading)"""
@@ -34,6 +47,32 @@ def get_embedding_model():
             logger.error(f"Failed to load embedding model: {e}")
             raise
     return _embedding_model
+
+def get_embedding_executor():
+    """Get or create the process pool executor for CPU-intensive embedding operations"""
+    global _embedding_executor
+    if _embedding_executor is None:
+        # Use a single worker to avoid memory duplication of the model
+        _embedding_executor = concurrent.futures.ProcessPoolExecutor(
+            max_workers=1,
+            initializer=_init_embedding_worker
+        )
+        logger.info("Initialized embedding process pool executor")
+    return _embedding_executor
+
+def _init_embedding_worker():
+    """Initialize the embedding model in worker process"""
+    # This runs in the worker process to initialize the model there
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        _embedding_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+
+def _encode_text_worker(text: str) -> List[float]:
+    """Worker function for encoding text (runs in process pool)"""
+    model = get_embedding_model()
+    embedding = model.encode(text, convert_to_numpy=True)
+    return embedding.tolist()
 
 class SearchFeature(Enum):
     """Available search features that can be enabled modularly"""
@@ -106,6 +145,25 @@ class AISearchEngine:
 
         Returns enhanced results based on enabled feature set
         """
+
+        # Validate input parameters
+        try:
+            if not query or not isinstance(query, str):
+                raise ValueError("Query must be a non-empty string")
+            if len(query.strip()) == 0:
+                raise ValueError("Query cannot be empty or whitespace only")
+            if len(query) > 1000:
+                raise ValueError("Query too long (max 1000 characters)")
+
+            limit = validate_positive_integer(limit, "limit", 1, 100)
+            offset = validate_positive_integer(offset, "offset", 0, 10000)
+
+            # Sanitize query
+            query = query.strip()
+
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid search parameters: {e}")
+            raise ValueError(f"Invalid search parameters: {e}")
 
         # Build base query using highest priority enabled feature
         if SearchFeature.HYBRID_SEARCH in self.config.enabled_features:
@@ -191,19 +249,19 @@ class AISearchEngine:
             return {"match_all": {}}
 
     async def _get_query_embedding(self, query: str) -> List[float]:
-        """Get embedding for query text using sentence transformers"""
-        def _encode_text(text: str) -> List[float]:
-            model = get_embedding_model()
-            embedding = model.encode(text, convert_to_numpy=True)
-            # Ensure it's a list of floats for Elasticsearch
-            return embedding.tolist()
+        """Get embedding for query text using sentence transformers in process pool"""
+        try:
+            # Use process pool to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            executor = get_embedding_executor()
+            embedding = await loop.run_in_executor(executor, _encode_text_worker, query)
 
-        # Run encoding in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(None, _encode_text, query)
-
-        logger.debug(f"Generated embedding for query '{query[:50]}...': {len(embedding)} dimensions")
-        return embedding
+            logger.debug(f"Generated embedding for query '{query[:50]}...': {len(embedding)} dimensions")
+            return embedding
+        except Exception as e:
+            logger.error(f"Failed to generate embedding for query '{query[:50]}...': {e}")
+            # Return empty embedding as fallback (will cause search to skip semantic component)
+            return []
 
     async def _hybrid_search(self, query: str) -> Dict[str, Any]:
         """Combined keyword + semantic search with configurable weights"""
@@ -394,6 +452,14 @@ class AISearchEngine:
             "similar_cases": []
         }
         return results
+
+    def cleanup(self):
+        """Cleanup resources including process pool executor"""
+        global _embedding_executor
+        if _embedding_executor is not None:
+            _embedding_executor.shutdown(wait=True)
+            _embedding_executor = None
+            logger.info("Cleaned up embedding process pool executor")
 
 # Pre-configured feature sets for different use cases
 class SearchProfiles:

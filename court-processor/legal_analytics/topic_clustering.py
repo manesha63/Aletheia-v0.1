@@ -13,6 +13,10 @@ from collections import defaultdict, Counter
 import networkx as nx
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering, DBSCAN
+from pydantic import ValidationError
+
+# Import validation models
+from .validation import TopicClusteringRequest, validate_positive_integer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
 import json
@@ -74,7 +78,17 @@ class TopicClusteringService:
         - Computational metadata for LLM reasoning
         """
 
-        logger.info("Building topic clusters from Elasticsearch...")
+        # Validate parameters
+        try:
+            min_cluster_size = validate_positive_integer(min_cluster_size, "min_cluster_size", 2, 20)
+            max_clusters = validate_positive_integer(max_clusters, "max_clusters", 1, 100)
+            if not 0.0 <= similarity_threshold <= 1.0:
+                raise ValueError("similarity_threshold must be between 0.0 and 1.0")
+        except ValueError as e:
+            logger.error(f"Invalid clustering parameters: {e}")
+            raise ValueError(f"Invalid clustering parameters: {e}")
+
+        logger.info(f"Building topic clusters from Elasticsearch (min_size={min_cluster_size}, max_clusters={max_clusters})")
 
         # Fetch all documents with topic data
         documents = await self._fetch_documents_with_topics()
@@ -153,10 +167,8 @@ class TopicClusteringService:
             "suggested_clusters": []  # Would be populated by main clustering
         }
 
-    async def _fetch_documents_with_topics(self, batch_size: int = 1000) -> List[Dict]:
-        """Fetch all documents with legal topic data"""
-        documents = []
-
+    async def _process_documents_in_batches(self, batch_processor, batch_size: int = 100) -> None:
+        """Process documents in memory-efficient batches"""
         query = {
             "query": {
                 "nested": {
@@ -184,20 +196,38 @@ class TopicClusteringService:
 
         scroll_id = response["_scroll_id"]
         hits = response["hits"]["hits"]
+        total_processed = 0
 
-        while hits:
-            documents.extend([hit["_source"] for hit in hits])
+        try:
+            while hits:
+                # Process current batch
+                batch_documents = [hit["_source"] for hit in hits]
+                await batch_processor(batch_documents)
+                total_processed += len(batch_documents)
 
-            response = await self.es.scroll(
-                scroll_id=scroll_id,
-                scroll="5m"
-            )
-            hits = response["hits"]["hits"]
+                # Fetch next batch
+                response = await self.es.scroll(
+                    scroll_id=scroll_id,
+                    scroll="5m"
+                )
+                hits = response["hits"]["hits"]
 
-        # Clear scroll
-        await self.es.clear_scroll(scroll_id=scroll_id)
+        finally:
+            # Always clear scroll
+            await self.es.clear_scroll(scroll_id=scroll_id)
 
-        logger.info(f"Fetched {len(documents)} documents with topics for clustering")
+        logger.info(f"Processed {total_processed} documents in batches for topic clustering")
+
+    async def _fetch_documents_with_topics(self, batch_size: int = 1000) -> List[Dict]:
+        """Fetch all documents with legal topic data - DEPRECATED: Use _process_documents_in_batches"""
+        logger.warning("_fetch_documents_with_topics is deprecated. Use _process_documents_in_batches for better memory efficiency")
+
+        documents = []
+
+        async def collect_batch(batch):
+            documents.extend(batch)
+
+        await self._process_documents_in_batches(collect_batch, batch_size)
         return documents
 
     def _build_topic_cooccurrence_matrix(self, documents: List[Dict]) -> Dict[str, Dict[str, int]]:

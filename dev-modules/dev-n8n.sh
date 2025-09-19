@@ -491,7 +491,7 @@ EOF
                     echo "  deactivate  - Deactivate all (or specific) workflow(s)"
                     echo "  execute     - Execute a specific workflow"
                     echo "  status      - Show workflow status"
-                    echo "  sync        - Sync workflows with workflow_json/ directory"
+                    echo "  sync        - Smart bidirectional sync between n8n and workflow_json/"
                     echo "  save        - Save workflows back to workflow_json/ for git commit"
                     ;;
             esac

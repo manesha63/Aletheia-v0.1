@@ -40,6 +40,7 @@ RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \
         echo "Building $(basename $node_dir)..."; \
         cd "$node_dir" && \
         npm install && \
+        npm install gulp --save-dev && \
         (npm run build || echo "Warning: Build had errors for $(basename $node_dir), continuing..."); \
     done
 

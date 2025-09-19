@@ -425,8 +425,9 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
                               <div className="font-medium text-sm">
                                 {formatCaseName(doc)}
                               </div>
-                              {/* Show document type if extracted */}
-                              {(doc as any).document_type_extracted && (
+                              {/* Only show document type if it's not already in the formatted title */}
+                              {(doc as any).document_type_extracted &&
+                               !(doc as any).formatted_title_short?.includes((doc as any).document_type_extracted) && (
                                 <div className="text-xs text-blue-500 mt-0.5">
                                   {(doc as any).document_type_extracted}
                                 </div>

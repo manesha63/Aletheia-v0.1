@@ -31,7 +31,7 @@ fi
 # Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
 for i in {1..30}; do
-    if PGPASSWORD="${DB_PASSWORD:-aletheia123}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" >/dev/null 2>&1; then
+    if PGPASSWORD="${DB_PASSWORD}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" >/dev/null 2>&1; then
         echo "✅ Database is ready"
         break
     fi
@@ -43,7 +43,7 @@ for i in {1..30}; do
 done
 
 # Check if table exists and has data
-EXISTING_COUNT=$(PGPASSWORD="${DB_PASSWORD:-aletheia123}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM public.court_documents" 2>/dev/null || echo "0")
+EXISTING_COUNT=$(PGPASSWORD="${DB_PASSWORD}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM public.court_documents" 2>/dev/null || echo "0")
 EXISTING_COUNT=$(echo $EXISTING_COUNT | tr -d ' ')
 
 if [ "$EXISTING_COUNT" -gt "0" ]; then
@@ -55,17 +55,17 @@ if [ "$EXISTING_COUNT" -gt "0" ]; then
         exit 0
     fi
     echo "🗑️  Clearing existing data..."
-    PGPASSWORD="${DB_PASSWORD:-aletheia123}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "TRUNCATE TABLE public.court_documents RESTART IDENTITY CASCADE;"
+    PGPASSWORD="${DB_PASSWORD}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "TRUNCATE TABLE public.court_documents RESTART IDENTITY CASCADE;"
 fi
 
 # Restore the data
 echo "📥 Importing court documents data..."
-gunzip -c "$SCRIPT_DIR/court_documents_backup.sql.gz" | PGPASSWORD="${DB_PASSWORD:-aletheia123}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME"
+gunzip -c "$SCRIPT_DIR/court_documents_backup.sql.gz" | PGPASSWORD="${DB_PASSWORD}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME"
 
 # Verify restoration
-NEW_COUNT=$(PGPASSWORD="${DB_PASSWORD:-aletheia123}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM public.court_documents")
+NEW_COUNT=$(PGPASSWORD="${DB_PASSWORD}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM public.court_documents")
 NEW_COUNT=$(echo $NEW_COUNT | tr -d ' ')
 
 echo "✅ Successfully restored $NEW_COUNT court documents"
 echo "📊 Document types:"
-PGPASSWORD="${DB_PASSWORD:-aletheia123}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT document_type, COUNT(*) as count FROM public.court_documents GROUP BY document_type ORDER BY count DESC;"
+PGPASSWORD="${DB_PASSWORD}" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT document_type, COUNT(*) as count FROM public.court_documents GROUP BY document_type ORDER BY count DESC;"

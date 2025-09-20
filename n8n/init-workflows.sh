@@ -98,6 +98,11 @@ delete_workflow_by_name() {
 import_workflows() {
     echo "[n8n-init] Importing workflows with deduplication..."
     
+    # Skip importing from /workflows - we only want /workflow_json
+    echo "[n8n-init] Skipping /workflows directory (using /workflow_json instead)"
+    return 0
+    
+    # DISABLED: Old import logic
     # Check if workflows directory exists
     if [ ! -d "/workflows" ]; then
         echo "[n8n-init] WARNING: /workflows directory not found"

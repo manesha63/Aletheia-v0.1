@@ -15,10 +15,10 @@ import json
 import tempfile
 import os
 
-from services.courtlistener_service import CourtListenerService
+from services.courtlistener import CourtListenerService
 from services.database import get_db_connection
-from services.recap.authenticated_client import AuthenticatedRECAPClient
-from pdf_processor import PDFProcessor
+# from services.recap.authenticated_client import AuthenticatedRECAPClient
+from extractors.pdf import PDFProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class DocumentIngestionService:
             'sources': {
                 'courtlistener_opinions': 0,
                 'courtlistener_recap': 0,
+                'courtlistener_enhanced': 0,
                 'direct_upload': 0
             },
             'processing': {
@@ -78,6 +79,7 @@ class DocumentIngestionService:
                                       max_per_court: int = 100,
                                       nature_of_suit: Optional[List[str]] = None,
                                       search_type: Optional[str] = None,
+                                      judge_name: Optional[str] = None,
                                       use_recap_fallback: bool = False,
                                       check_recap_first: bool = True,
                                       max_pacer_cost: float = 0.0) -> Dict[str, Any]:
@@ -89,6 +91,7 @@ class DocumentIngestionService:
             date_after: Date string (YYYY-MM-DD) for filtering
             document_types: Types to fetch ('opinions', 'recap')
             max_per_court: Maximum documents per court
+            judge_name: If provided, use enhanced search for judge-specific collection
             
         Returns:
             Ingestion statistics and results
@@ -102,22 +105,18 @@ class DocumentIngestionService:
         try:
             all_documents = []
             
-            # Use enhanced search if nature_of_suit provided for IP cases
-            if nature_of_suit and search_type:
-                logger.info(f"Using enhanced search for IP cases with nature_of_suit: {nature_of_suit}")
-                ip_documents = await self._fetch_ip_focused_documents(
-                    court_ids, date_after, nature_of_suit, search_type, max_per_court
-                )
-                all_documents.extend(ip_documents)
-                self.stats['sources']['courtlistener_opinions'] += len(ip_documents)
-            # Otherwise use standard opinions endpoint
-            elif 'opinions' in document_types:
-                logger.info("Fetching opinions from CourtListener...")
-                opinions = await self._fetch_and_process_opinions(
-                    court_ids, date_after, max_per_court
+            # Unified opinion collection with intelligent routing
+            if 'opinions' in document_types:
+                opinions = await self._fetch_documents(
+                    document_type='opinions',
+                    court_ids=court_ids,
+                    date_after=date_after,
+                    max_per_court=max_per_court,
+                    judge_name=judge_name,
+                    nature_of_suit=nature_of_suit,
+                    search_type=search_type
                 )
                 all_documents.extend(opinions)
-                self.stats['sources']['courtlistener_opinions'] += len(opinions)
             
             # Fetch RECAP documents if requested
             if 'recap' in document_types:
@@ -146,6 +145,107 @@ class DocumentIngestionService:
         
         results['statistics'] = self.get_statistics()
         return results
+
+    async def collect_documents(self,
+                              court_id: str,
+                              judge_name: Optional[str] = None,
+                              date_after: Optional[str] = None,
+                              date_before: Optional[str] = None,
+                              max_documents: int = 100,
+                              run_pipeline: bool = False,
+                              extract_pdfs: bool = True,
+                              store_to_db: bool = True,
+                              **kwargs) -> Dict[str, Any]:
+        """
+        CLI-compatible wrapper for unified collection with intelligent routing
+
+        Provides backward compatibility for CLI while leveraging the new unified
+        collection strategy that automatically selects optimal approach based on parameters.
+
+        Args:
+            court_id: Court identifier (e.g., 'txed')
+            judge_name: Judge name for enhanced collection (triggers rich metadata extraction)
+            date_after: Start date filter (YYYY-MM-DD)
+            date_before: End date filter (currently not used in underlying API)
+            max_documents: Maximum documents to collect
+            run_pipeline: Whether to run enhancement pipeline (not implemented)
+            extract_pdfs: Whether to extract PDF content
+            store_to_db: Whether to store results in database
+
+        Returns:
+            Collection results with documents, statistics, and performance metrics
+        """
+        # Use unified collection with intelligent routing
+        return await self.ingest_from_courtlistener(
+            court_ids=[court_id],
+            date_after=date_after,
+            document_types=['opinions'],
+            max_per_court=max_documents,
+            judge_name=judge_name
+        )
+    
+    def _determine_collection_strategy(self,
+                                     judge_name: Optional[str] = None,
+                                     nature_of_suit: Optional[List[str]] = None,
+                                     search_type: Optional[str] = None) -> str:
+        """
+        Determine the optimal collection strategy based on parameters
+        
+        Returns:
+            'enhanced_judge': Enhanced search with judge-specific collection
+            'enhanced_ip': Enhanced search for IP-focused cases
+            'standard': Standard bulk collection via opinions endpoint
+        """
+        if judge_name:
+            # Enhanced judge collection provides best metadata/content quality
+            logger.info(f"Strategy: Enhanced judge collection for {judge_name}")
+            return 'enhanced_judge'
+        elif nature_of_suit and search_type:
+            # Enhanced IP collection for specialized patent/IP case analysis
+            logger.info(f"Strategy: Enhanced IP collection for {nature_of_suit}")
+            return 'enhanced_ip'
+        else:
+            # Standard collection for broad coverage and efficiency
+            logger.info("Strategy: Standard bulk collection")
+            return 'standard'
+    
+    async def _fetch_documents(self,
+                             document_type: str,
+                             court_ids: List[str],
+                             date_after: str,
+                             max_per_court: int,
+                             judge_name: Optional[str] = None,
+                             nature_of_suit: Optional[List[str]] = None,
+                             search_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Unified document collection with intelligent routing
+        
+        Automatically selects the optimal collection strategy based on parameters:
+        - Enhanced judge collection: Best for judge-specific research (rich metadata, 100% attribution)
+        - Enhanced IP collection: Best for patent/IP case analysis (specialized filters)
+        - Standard collection: Best for broad coverage and efficiency (fast, bulk access)
+        """
+        strategy = self._determine_collection_strategy(judge_name, nature_of_suit, search_type)
+        
+        if strategy == 'enhanced_judge':
+            documents = await self._fetch_enhanced_judge_documents(
+                judge_name, court_ids, date_after, max_per_court
+            )
+            self.stats['sources']['courtlistener_enhanced'] += len(documents)
+            
+        elif strategy == 'enhanced_ip':
+            documents = await self._fetch_ip_focused_documents(
+                court_ids, date_after, nature_of_suit, search_type, max_per_court
+            )
+            self.stats['sources']['courtlistener_opinions'] += len(documents)
+            
+        else:  # standard
+            documents = await self._fetch_and_process_opinions(
+                court_ids, date_after, max_per_court
+            )
+            self.stats['sources']['courtlistener_opinions'] += len(documents)
+        
+        return documents
     
     async def _fetch_and_process_opinions(self,
                                         court_ids: List[str],
@@ -730,6 +830,411 @@ class DocumentIngestionService:
             logger.error(f"RECAP fallback error: {e}")
         
         return total_cost
+    
+    async def _fetch_enhanced_judge_documents(self,
+                                            judge_name: str,
+                                            court_ids: List[str],
+                                            date_after: str,
+                                            max_per_court: int) -> List[Dict[str, Any]]:
+        """
+        Fetch documents using enhanced search + cluster method for maximum metadata richness
+        """
+        enhanced_documents = []
+        
+        for court_id in court_ids:
+            logger.info(f"Enhanced search for {judge_name} in {court_id}...")
+            
+            # Step 1: Search using judge query
+            search_results = await self._search_judge_documents(
+                judge_name=judge_name,
+                court_id=court_id,
+                date_after=date_after,
+                max_results=max_per_court
+            )
+            
+            # Step 2: Enhance each result with cluster metadata
+            for search_result in search_results:
+                enhanced_doc = await self._enhance_with_cluster_metadata(search_result, court_id)
+                if enhanced_doc:
+                    enhanced_documents.append(enhanced_doc)
+                    self.stats['processing']['total_documents'] += 1
+        
+        return enhanced_documents
+    
+    async def _search_judge_documents(self,
+                                    judge_name: str,
+                                    court_id: str,
+                                    date_after: str,
+                                    max_results: int) -> List[Dict[str, Any]]:
+        """
+        Search for judge documents using CourtListener search endpoint
+        """
+        session = await self.cl_service._get_session()
+        search_url = f"{self.cl_service.BASE_URL}{self.cl_service.SEARCH_ENDPOINT}"
+        
+        params = {
+            'type': 'o',  # opinions
+            'q': f'judge:{judge_name}',
+            'court': court_id,
+            'filed_after': date_after,
+            'page_size': min(100, max_results)
+        }
+        
+        documents = []
+        
+        async with session.get(search_url, params=params, headers=self.cl_service.headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                documents = data.get('results', [])
+                
+                # Handle pagination if needed
+                while len(documents) < max_results and data.get('next'):
+                    async with session.get(data['next'], headers=self.cl_service.headers) as next_response:
+                        if next_response.status == 200:
+                            next_data = await next_response.json()
+                            documents.extend(next_data.get('results', []))
+                            data = next_data
+                        else:
+                            break
+            else:
+                logger.warning(f"Search failed for {judge_name} in {court_id}: {response.status}")
+        
+        return documents[:max_results]
+    
+    async def _enhance_with_cluster_metadata(self, 
+                                           search_result: Dict[str, Any], 
+                                           court_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Enhance search result with rich metadata from cluster endpoint
+        """
+        try:
+            cluster_id = search_result.get('cluster_id')
+            if not cluster_id:
+                logger.warning("No cluster_id found in search result")
+                return None
+            
+            # Fetch full cluster details
+            session = await self.cl_service._get_session()
+            cluster_url = f"{self.cl_service.BASE_URL}/api/rest/v4/clusters/{cluster_id}/"
+            
+            async with session.get(cluster_url, headers=self.cl_service.headers) as response:
+                if response.status == 200:
+                    cluster_data = await response.json()
+                    
+                    # Create enhanced document structure
+                    document = {
+                        'case_number': search_result.get('docketNumber', f"ENHANCED-{court_id}-{cluster_id}"),
+                        'case_name': cluster_data.get('case_name', ''),
+                        'document_type': self._determine_enhanced_document_type(cluster_data),
+                        'content': '',  # Will be populated from opinions
+                        'metadata': {
+                            # Enhanced metadata with maximum richness
+                            'source': 'courtlistener_enhanced',
+                            'collection_method': 'enhanced_judge_search',
+                            'cluster_id': cluster_id,
+                            'court_id': court_id,
+                            
+                            # Rich judge information (multiple fields for reliability)
+                            'judges': cluster_data.get('judges', ''),
+                            'judge_name': cluster_data.get('judges', ''),  # Map to standard field
+                            'panel': cluster_data.get('panel', []),
+                            'non_participating_judges': cluster_data.get('non_participating_judges', []),
+                            
+                            # Complete case metadata
+                            'case_name': cluster_data.get('case_name', ''),
+                            'case_name_full': cluster_data.get('case_name_full', ''),
+                            'date_filed': cluster_data.get('date_filed', ''),
+                            'date_argued': cluster_data.get('date_argued', ''),
+                            'court': search_result.get('court', ''),
+                            'absolute_url': cluster_data.get('absolute_url', ''),
+                            
+                            # Legal metadata
+                            'nature_of_suit': cluster_data.get('nature_of_suit', ''),
+                            'posture': cluster_data.get('posture', ''),
+                            'procedural_history': cluster_data.get('procedural_history', ''),
+                            'disposition': cluster_data.get('disposition', ''),
+                            'precedential_status': cluster_data.get('precedential_status', ''),
+                            
+                            # Citation information
+                            'citations': cluster_data.get('citations', []),
+                            'citation_count': cluster_data.get('citation_count', 0),
+                            
+                            # Processing metadata
+                            'processed_at': datetime.now().isoformat(),
+                            'api_version': 'v4_enhanced'
+                        }
+                    }
+                    
+                    # Try to extract content from sub-opinions
+                    await self._extract_opinion_content(document, cluster_data)
+                    
+                    return document
+                else:
+                    logger.warning(f"Failed to fetch cluster {cluster_id}: {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error enhancing document with cluster metadata: {e}")
+            return None
+    
+    async def _extract_opinion_content(self, document: Dict[str, Any], cluster_data: Dict[str, Any]):
+        """
+        Extract opinion text content from sub_opinions
+        """
+        try:
+            sub_opinions = cluster_data.get('sub_opinions', [])
+            if sub_opinions and isinstance(sub_opinions[0], str):
+                session = await self.cl_service._get_session()
+                opinion_url = sub_opinions[0]
+                
+                async with session.get(opinion_url, headers=self.cl_service.headers) as response:
+                    if response.status == 200:
+                        opinion_data = await response.json()
+                        
+                        # Try multiple content sources in order of preference
+                        content = (
+                            opinion_data.get('plain_text') or
+                            opinion_data.get('html_with_citations') or 
+                            opinion_data.get('html') or
+                            ''
+                        )
+                        
+                        document['content'] = content
+                        document['metadata']['content_length'] = len(content)
+                        document['metadata']['opinion_type'] = opinion_data.get('type', '')
+                        document['metadata']['page_count'] = opinion_data.get('page_count', 0)
+
+                        # Enhanced XML parsing for structured content
+                        if content and content.strip().startswith('<opinion'):
+                            enhanced_metadata = self._parse_xml_content(content)
+                            document['metadata'].update(enhanced_metadata)
+
+                        # Update stats
+                        self.stats['content']['total_characters'] += len(content)
+                        if content:
+                            self.stats['processing']['pdfs_extracted'] += 1
+                        
+        except Exception as e:
+            logger.debug(f"Could not extract opinion content: {e}")
+
+    def _parse_xml_content(self, content: str) -> Dict[str, Any]:
+        """
+        Parse XML structured content to extract enhanced metadata
+
+        Extracts judicial, procedural, and citation information from
+        rich XML opinion content for improved searchability and analysis.
+        """
+        import re
+
+        metadata = {}
+
+        try:
+            # Judge information extraction
+            judge_match = re.search(r'<author[^>]*>([^<]+)</author>', content)
+            if judge_match:
+                full_judge = judge_match.group(1).strip()
+                metadata['xml_judge_full'] = full_judge
+                # Extract just the judge name (before comma or title)
+                judge_name_match = re.search(r'^([A-Z\s\.]+?)(?:,|\s+United|\s+U\.S\.)', full_judge)
+                if judge_name_match:
+                    metadata['xml_judge_name'] = judge_name_match.group(1).strip()
+
+            # Opinion structure analysis
+            opinion_type_match = re.search(r'<opinion type="([^"]+)">', content)
+            if opinion_type_match:
+                metadata['xml_opinion_type'] = opinion_type_match.group(1)
+
+            # Paragraph structure for navigation
+            paragraphs = re.findall(r'<p id="([^"]+)">', content)
+            metadata['xml_paragraph_count'] = len(paragraphs)
+            metadata['xml_has_structure'] = len(paragraphs) > 0
+
+            # Citation extraction from XML tags
+            xml_citations = re.findall(
+                r'<extracted-citation[^>]*>.*?<span[^>]*>([^<]+)</span>.*?</extracted-citation>',
+                content, re.DOTALL
+            )
+            metadata['xml_citation_count'] = len(xml_citations)
+            if xml_citations:
+                metadata['xml_citations'] = xml_citations[:10]  # Store first 10 for preview
+                # Extract citation URLs for network analysis
+                citation_urls = re.findall(r'<extracted-citation[^>]*url="([^"]+)"', content)
+                metadata['xml_citation_urls'] = citation_urls[:10]
+
+            # Page number references for legal citations
+            page_numbers = re.findall(r'<page-number[^>]*label="([^"]+)"', content)
+            metadata['xml_page_count'] = len(page_numbers)
+            if page_numbers:
+                metadata['xml_page_numbers'] = page_numbers[:5]  # First few for reference
+
+            # Legal procedure detection
+            legal_motions = []
+            motion_patterns = [
+                r'Motion to ([^,\.;]{5,50})',
+                r'motion for ([^,\.;]{5,50})',
+                r'([A-Z][^,\.;]*Motion[^,\.;]{5,50})'
+            ]
+            for pattern in motion_patterns:
+                motions = re.findall(pattern, content, re.IGNORECASE)
+                legal_motions.extend([m.strip() for m in motions])
+
+            if legal_motions:
+                # Deduplicate and limit
+                unique_motions = list(set(legal_motions))[:5]
+                metadata['xml_legal_motions'] = unique_motions
+                metadata['xml_motion_count'] = len(unique_motions)
+
+            # Federal rules and statutes
+            fed_rules = re.findall(
+                r'(?:Fed\.|Federal)\s*R\s*[\w\.]*\s*(?:Civ\.|Evid\.|Crim\.|App\.)\s*P\s*[\d\.]+',
+                content
+            )
+            if fed_rules:
+                metadata['xml_federal_rules'] = list(set(fed_rules))[:5]
+
+            statutes = re.findall(r'\d+\s+U\.S\.C\.\s*§\s*\d+', content)
+            if statutes:
+                metadata['xml_statutes'] = list(set(statutes))[:5]
+
+            # Content richness indicators
+            metadata['xml_parsing_enabled'] = True
+            metadata['xml_content_type'] = 'structured_opinion'
+
+            logger.debug(f"XML parsing extracted {len(metadata)} metadata fields")
+
+        except Exception as e:
+            logger.warning(f"XML parsing failed: {e}")
+            metadata['xml_parsing_error'] = str(e)
+
+        return metadata
+
+    async def retroactive_xml_parsing(self,
+                                     batch_size: int = 50,
+                                     dry_run: bool = True) -> Dict[str, Any]:
+        """
+        Apply XML parsing to existing enhanced collection documents
+
+        Processes documents that have XML content but haven't been parsed yet,
+        updating their metadata with extracted structured information.
+
+        Args:
+            batch_size: Number of documents to process per batch
+            dry_run: If True, reports what would be done without making changes
+
+        Returns:
+            Statistics about the parsing operation
+        """
+        from .database import get_db_connection
+
+        stats = {
+            'candidates_found': 0,
+            'successfully_parsed': 0,
+            'parsing_errors': 0,
+            'database_errors': 0,
+            'total_metadata_fields': 0,
+            'sources_processed': {},
+            'dry_run': dry_run
+        }
+
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+
+                # Find XML documents without parsing
+                find_query = """
+                    SELECT id, case_number, content, metadata
+                    FROM court_documents
+                    WHERE content LIKE '<opinion%'
+                      AND (metadata IS NULL OR NOT metadata ? 'xml_parsing_enabled')
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                """
+
+                cur.execute(find_query, (batch_size,))
+                candidates = cur.fetchall()
+                stats['candidates_found'] = len(candidates)
+
+                if not candidates:
+                    logger.info("No XML parsing candidates found")
+                    return stats
+
+                logger.info(f"Found {len(candidates)} documents for XML parsing")
+
+                for i, row in enumerate(candidates):
+                    try:
+                        if len(row) != 4:
+                            logger.error(f"Row {i} has unexpected length {len(row)}: {row}")
+                            continue
+                        doc_id, case_number, content, metadata_json = row[0], row[1], row[2], row[3]
+                    except Exception as e:
+                        logger.error(f"Error unpacking row {i}: {e}, row={row}")
+                        stats['database_errors'] += 1
+                        continue
+                    try:
+                        # Parse existing metadata (handle both dict and JSON string)
+                        import json
+                        if isinstance(metadata_json, dict):
+                            metadata = metadata_json
+                        else:
+                            metadata = json.loads(metadata_json) if metadata_json else {}
+                        source = metadata.get('source', 'unknown')
+
+                        # Track sources
+                        if source not in stats['sources_processed']:
+                            stats['sources_processed'][source] = 0
+                        stats['sources_processed'][source] += 1
+
+                        # Apply XML parsing
+                        xml_metadata = self._parse_xml_content(content)
+
+                        if xml_metadata:
+                            # Merge XML metadata into existing metadata
+                            metadata.update(xml_metadata)
+                            stats['total_metadata_fields'] += len(xml_metadata)
+
+                            if not dry_run:
+                                # Update database with enhanced metadata
+                                update_query = """
+                                    UPDATE court_documents
+                                    SET metadata = %s, updated_at = NOW()
+                                    WHERE id = %s
+                                """
+                                cur.execute(update_query, (json.dumps(metadata), doc_id))
+
+                            stats['successfully_parsed'] += 1
+                            logger.debug(f"Enhanced document {doc_id} ({case_number}) with {len(xml_metadata)} XML fields")
+                        else:
+                            stats['parsing_errors'] += 1
+                            logger.warning(f"XML parsing failed for document {doc_id}")
+
+                    except Exception as e:
+                        stats['database_errors'] += 1
+                        logger.error(f"Error processing document {doc_id}: {e}")
+
+                if not dry_run:
+                    conn.commit()
+                    logger.info(f"Committed {stats['successfully_parsed']} XML parsing updates to database")
+                else:
+                    logger.info(f"DRY RUN: Would update {stats['successfully_parsed']} documents")
+
+        except Exception as e:
+            logger.error(f"Batch XML parsing failed: {e}")
+            stats['database_errors'] += 1
+
+        return stats
+
+    def _determine_enhanced_document_type(self, cluster_data: Dict[str, Any]) -> str:
+        """
+        Determine document type based on cluster metadata
+        """
+        precedential_status = cluster_data.get('precedential_status', '').lower()
+        
+        if 'published' in precedential_status:
+            return 'published_opinion'
+        elif 'unpublished' in precedential_status:
+            return 'unpublished_opinion'
+        else:
+            return 'opinion_enhanced'
     
     def get_statistics(self) -> Dict[str, Any]:
         """Get comprehensive ingestion statistics"""

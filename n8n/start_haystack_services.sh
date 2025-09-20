@@ -5,25 +5,14 @@ echo "🚀 Starting Haystack Services for Judicial Access"
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Check if we're in the n8n directory or if we can find the compose files
-if [ -f "$SCRIPT_DIR/docker-compose.haystack.yml" ]; then
-    # Script is in the correct location
-    cd "$SCRIPT_DIR/.."
-elif [ -f "docker-compose.haystack.yml" ] && [ -f "../docker-compose.yml" ]; then
-    # We're already in the n8n directory
-    cd ..
-else
-    echo "❌ Error: Cannot find docker-compose files. Please run this script from the n8n directory."
-    echo "   Current directory: $(pwd)"
-    echo "   Expected files: docker-compose.haystack.yml and ../docker-compose.yml"
-    exit 1
-fi
+# Navigate to project root
+cd "$SCRIPT_DIR/.."
 
 # Verify we're in the correct directory
-if [ ! -f "docker-compose.yml" ] || [ ! -f "n8n/docker-compose.haystack.yml" ]; then
+if [ ! -f "docker-compose.yml" ]; then
     echo "❌ Error: Not in the correct directory structure."
     echo "   Current directory: $(pwd)"
-    echo "   Missing required files."
+    echo "   Missing docker-compose.yml file."
     exit 1
 fi
 
@@ -35,14 +24,14 @@ fi
 
 # Check if main services are running
 if ! docker-compose ps | grep -q "n8n.*Up"; then
-    echo "⚠️  Main n8n services are not running. Starting them first..."
+    echo "⚠️  Main services are not running. Starting them first..."
     docker-compose up -d
     sleep 10
 fi
 
-# Start Haystack services using both compose files
+# Start Haystack services using main compose file
 echo "📦 Starting Haystack and Elasticsearch services..."
-docker-compose -f docker-compose.yml -f n8n/docker-compose.haystack.yml up -d elasticsearch haystack-service
+docker-compose up -d elasticsearch haystack-service unstructured-service
 
 # Wait for services to be ready
 echo "⏳ Waiting for services to start..."
@@ -82,4 +71,4 @@ echo "🔍 Elasticsearch: http://localhost:${ELASTICSEARCH_PORT}"
 echo "🤖 Haystack API: http://localhost:${HAYSTACK_PORT}"
 echo "📚 API docs: http://localhost:${HAYSTACK_PORT}/docs"
 echo ""
-echo "💡 To stop all services: docker-compose -f docker-compose.yml -f n8n/docker-compose.haystack.yml down"
+echo "💡 To stop all services: docker-compose down"

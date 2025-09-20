@@ -71,7 +71,7 @@ async def fetch_ip_case_documents():
     Example of fetching IP case documents using authenticated client
     """
     # Load credentials
-    cl_token = os.getenv('COURTLISTENER_API_TOKEN')
+    cl_token = os.getenv('COURTLISTENER_API_KEY')
     pacer_username = os.getenv('PACER_USERNAME')
     pacer_password = os.getenv('PACER_PASSWORD')
     

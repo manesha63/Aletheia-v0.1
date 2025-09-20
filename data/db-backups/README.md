@@ -4,15 +4,17 @@ This directory contains a compressed backup of the court documents (opinions) fr
 
 ## Files
 
-- `court_documents_complete.sql.gz` - Complete SQL dump of the court_documents table (3.1MB compressed)
+- `court_documents_complete.sql.gz` - Complete SQL dump of the court_documents table (3.9MB compressed)
 - `restore_court_documents.sh` - Script to restore the backup
 
 ## Statistics
 
-- **Total Documents**: 485 court opinions
-- **Uncompressed Size**: ~8.7MB
-- **Compressed Size**: 3.1MB (suitable for git storage)
-- **Compression Ratio**: ~65% size reduction
+- **Total Documents**: 637 court opinions and related documents
+- **XML-Enhanced**: 72 documents with structured legal metadata
+- **Uncompressed Size**: ~15MB
+- **Compressed Size**: 3.9MB (suitable for git storage)
+- **Compression Ratio**: ~74% size reduction
+- **Enhanced Features**: Citations, judge attribution, legal motions, federal rules
 
 ## Usage
 
@@ -44,7 +46,22 @@ psql -h localhost -p 8200 -U aletheia -d aletheia -f court_documents_complete.sq
 
 ## Creating a Fresh Backup
 
-To create a new backup from the running database:
+### Using Dev CLI (Recommended)
+
+```bash
+./dev db backup -b
+# or
+./dev db backup --update-baseline
+```
+
+This command will:
+- Export current court documents from the database
+- Compress using maximum compression (gzip -9)
+- Update both backup files (data/db-backups/ and court-processor/data/)
+- Show statistics including XML-enhanced document count
+- Provide guidance for committing updated backups
+
+### Manual Method (Alternative)
 
 ```bash
 # Export data

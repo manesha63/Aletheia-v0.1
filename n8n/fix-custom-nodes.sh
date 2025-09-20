@@ -11,6 +11,9 @@ fix_node_index() {
     NODE_CLASS="$3"
     
     if [ -d "$NODE_DIR" ]; then
+        # Ensure dist directory exists
+        mkdir -p "$NODE_DIR/dist"
+        
         if [ ! -f "$NODE_DIR/dist/index.js" ]; then
             echo "  ✨ Creating index.js for $NODE_NAME..."
             cat > "$NODE_DIR/dist/index.js" << EOF
@@ -37,13 +40,5 @@ echo "  ✓ DeepSeek uses different loading mechanism"
 
 echo "✅ Custom nodes fixed!"
 
-# Run auto-setup in background after n8n starts
-(
-    sleep 10  # Give n8n time to initialize
-    if [ -f /usr/local/bin/auto-setup ]; then
-        /usr/local/bin/auto-setup
-    fi
-) &
-
-# Start n8n normally
-exec n8n
+# Return control to entrypoint so it can run startup scripts
+# Do NOT start n8n here - let the entrypoint handle it

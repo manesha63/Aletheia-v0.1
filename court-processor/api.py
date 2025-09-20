@@ -221,9 +221,16 @@ async def health():
         "api": "Simplified Court Documents API v2",
         "endpoints": {
             "GET /text/{id}": "Get plain text directly",
-            "GET /documents/{id}": "Get full document info", 
+            "GET /documents/{id}": "Get full document info with XML metadata",
             "GET /search": "Simple search with direct text",
-            "GET /list": "List recent documents"
+            "GET /list": "List recent documents",
+            "GET /bulk/judge/{name}": "Bulk retrieval by judge with XML metadata",
+            "GET /sample": "Sample document for testing"
+        },
+        "features": {
+            "xml_metadata": "Rich legal metadata (citations, motions, rules)",
+            "bulk_export": "Large-scale data retrieval by judge",
+            "full_text": "Complete document content extraction"
         }
     }
 
@@ -349,7 +356,21 @@ async def get_document_simple(document_id: int):
                 "judge": metadata.get('judge_name'),
                 "date_filed": metadata.get('date_filed'),
                 "court": metadata.get('court_id')
-            }
+            },
+            # Enhanced XML parsing metadata (if available)
+            "xml_metadata": {
+                "parsing_enabled": metadata.get('xml_parsing_enabled', False),
+                "judge_full": metadata.get('xml_judge_full'),
+                "judge_name": metadata.get('xml_judge_name'),
+                "opinion_type": metadata.get('xml_opinion_type'),
+                "citation_count": metadata.get('xml_citation_count', 0),
+                "paragraph_count": metadata.get('xml_paragraph_count', 0),
+                "citations": metadata.get('xml_citations', []),
+                "legal_motions": metadata.get('xml_legal_motions', []),
+                "federal_rules": metadata.get('xml_federal_rules', []),
+                "statutes": metadata.get('xml_statutes', []),
+                "page_numbers": metadata.get('xml_page_numbers', [])
+            } if metadata.get('xml_parsing_enabled') else None
         }
         
     except HTTPException:
@@ -361,7 +382,7 @@ async def get_document_simple(document_id: int):
 @app.get("/search")
 async def search_simple(
     judge: Optional[str] = None,
-    type: str = "020lead",
+    type: str = "all",
     min_length: int = 5000,
     limit: int = Query(default=10, le=200),  # Increased for bulk retrieval
     offset: int = Query(default=0, ge=0)
@@ -612,7 +633,21 @@ async def get_bulk_by_judge(
                 "judge": metadata.get('judge_name', judge_name),
                 "court": metadata.get('court_id', 'Unknown'),
                 "date_filed": metadata.get('date_filed'),
-                "created": str(doc['created_at'])
+                "created": str(doc['created_at']),
+                # Always include XML metadata structure (unconditionally)
+                "xml_metadata": {
+                    "parsing_enabled": metadata.get('xml_parsing_enabled', False),
+                    "judge_full": metadata.get('xml_judge_full'),
+                    "judge_name": metadata.get('xml_judge_name'),
+                    "opinion_type": metadata.get('xml_opinion_type'),
+                    "citation_count": metadata.get('xml_citation_count', 0) if metadata.get('xml_parsing_enabled') else 0,
+                    "paragraph_count": metadata.get('xml_paragraph_count', 0) if metadata.get('xml_parsing_enabled') else 0,
+                    "citations": metadata.get('xml_citations', []) if metadata.get('xml_parsing_enabled') else [],
+                    "legal_motions": metadata.get('xml_legal_motions', []) if metadata.get('xml_parsing_enabled') else [],
+                    "federal_rules": metadata.get('xml_federal_rules', []) if metadata.get('xml_parsing_enabled') else [],
+                    "statutes": metadata.get('xml_statutes', []) if metadata.get('xml_parsing_enabled') else [],
+                    "page_numbers": metadata.get('xml_page_numbers', []) if metadata.get('xml_parsing_enabled') else []
+                }
             }
             
             if include_text:
@@ -634,6 +669,232 @@ async def get_bulk_by_judge(
         
     except Exception as e:
         logger.error(f"Bulk retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/judges")
+async def list_available_judges(
+    min_docs: int = Query(default=5, description="Minimum document count to include judge"),
+    min_length: int = Query(default=5000, description="Minimum content length for substantial documents")
+):
+    """
+    Get list of all available judges with document counts
+
+    Returns judges who have substantial documents in the database.
+    Useful for populating dynamic UI elements like Document Context cabinets.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Query to get judge statistics
+        query = """
+            SELECT
+                metadata->>'judge_name' as judge_name,
+                metadata->>'court_id' as court_id,
+                COUNT(*) as total_documents,
+                COUNT(CASE WHEN LENGTH(content) >= %s THEN 1 END) as substantial_documents,
+                MAX(metadata->>'judge_name') as full_name,
+                MIN(created_at) as first_document,
+                MAX(created_at) as latest_document
+            FROM public.court_documents
+            WHERE metadata->>'judge_name' IS NOT NULL
+            AND metadata->>'judge_name' != ''
+            AND metadata->>'judge_name' != 'Unknown'
+            AND LENGTH(content) > 1000
+            GROUP BY metadata->>'judge_name', metadata->>'court_id'
+            HAVING COUNT(*) >= %s
+            AND COUNT(CASE WHEN LENGTH(content) >= %s THEN 1 END) >= %s
+            ORDER BY substantial_documents DESC, total_documents DESC
+        """
+
+        cur.execute(query, [min_length, min_docs, min_length, min_docs])
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        judges = []
+        for row in results:
+            # Extract short name (e.g., "Rodney Gilstrap" -> "Gilstrap")
+            full_name = row['judge_name'] or row['full_name']
+            short_name = full_name.split()[-1] if full_name else 'Unknown'
+
+            judges.append({
+                "name": short_name,
+                "full_name": full_name,
+                "court": row['court_id'] or 'Unknown',
+                "total_documents": row['total_documents'],
+                "substantial_documents": row['substantial_documents'],
+                "first_document": row['first_document'].isoformat() if row['first_document'] else None,
+                "latest_document": row['latest_document'].isoformat() if row['latest_document'] else None
+            })
+
+        return {
+            "judges": judges,
+            "total_judges": len(judges),
+            "filters": {
+                "min_documents": min_docs,
+                "min_content_length": min_length
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list judges: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/courts")
+async def list_available_courts(
+    min_docs: int = Query(default=10, description="Minimum document count to include court")
+):
+    """
+    Get list of all available courts with document counts
+
+    Returns courts that have substantial document collections.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Query to get court statistics
+        query = """
+            SELECT
+                metadata->>'court_id' as court_id,
+                COUNT(*) as total_documents,
+                COUNT(DISTINCT metadata->>'judge_name') as judge_count,
+                COUNT(CASE WHEN LENGTH(content) >= 5000 THEN 1 END) as substantial_documents,
+                MIN(created_at) as first_document,
+                MAX(created_at) as latest_document
+            FROM public.court_documents
+            WHERE metadata->>'court_id' IS NOT NULL
+            AND metadata->>'court_id' != ''
+            AND metadata->>'court_id' != 'Unknown'
+            GROUP BY metadata->>'court_id'
+            HAVING COUNT(*) >= %s
+            ORDER BY total_documents DESC
+        """
+
+        cur.execute(query, [min_docs])
+        results = cur.fetchall()
+
+        # Get court name mappings
+        court_names = {
+            'txed': 'Eastern District of Texas',
+            'nysd': 'Southern District of New York',
+            'dcd': 'District of Columbia',
+            'ded': 'District of Delaware',
+            'ilnd': 'Northern District of Illinois',
+            'cit': 'Court of International Trade'
+        }
+
+        courts = []
+        for row in results:
+            court_id = row['court_id']
+            court_name = court_names.get(court_id, court_id.upper() if court_id else 'Unknown Court')
+
+            courts.append({
+                "court_id": court_id,
+                "name": court_name,
+                "total_documents": row['total_documents'],
+                "substantial_documents": row['substantial_documents'],
+                "judge_count": row['judge_count'],
+                "first_document": row['first_document'].isoformat() if row['first_document'] else None,
+                "latest_document": row['latest_document'].isoformat() if row['latest_document'] else None
+            })
+
+        cur.close()
+        conn.close()
+
+        return {
+            "courts": courts,
+            "total_courts": len(courts),
+            "filters": {
+                "min_documents": min_docs
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list courts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/stats/summary")
+async def get_data_summary():
+    """
+    Get overview statistics of the document collection
+
+    Provides high-level metrics useful for dashboards and data insights.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Get overall statistics
+        cur.execute("""
+            SELECT
+                COUNT(*) as total_documents,
+                COUNT(CASE WHEN LENGTH(content) >= 5000 THEN 1 END) as substantial_documents,
+                COUNT(CASE WHEN LENGTH(content) >= 50000 THEN 1 END) as very_long_documents,
+                COUNT(DISTINCT metadata->>'judge_name') as unique_judges,
+                COUNT(DISTINCT metadata->>'court_id') as unique_courts,
+                SUM(LENGTH(content)) as total_characters,
+                AVG(LENGTH(content))::int as avg_document_length
+            FROM public.court_documents
+            WHERE content IS NOT NULL
+            AND content != ''
+            AND metadata->>'judge_name' IS NOT NULL
+            AND metadata->>'judge_name' != 'Unknown'
+        """)
+
+        stats = cur.fetchone()
+
+        # Get top judges
+        cur.execute("""
+            SELECT metadata->>'judge_name' as judge_name, COUNT(*) as doc_count
+            FROM public.court_documents
+            WHERE metadata->>'judge_name' IS NOT NULL
+            AND metadata->>'judge_name' != 'Unknown'
+            AND LENGTH(content) >= 5000
+            GROUP BY metadata->>'judge_name'
+            ORDER BY COUNT(*) DESC
+            LIMIT 5
+        """)
+
+        top_judges = [{"name": row['judge_name'], "documents": row['doc_count']}
+                     for row in cur.fetchall()]
+
+        # Get top courts
+        cur.execute("""
+            SELECT metadata->>'court_id' as court_id, COUNT(*) as doc_count
+            FROM public.court_documents
+            WHERE metadata->>'court_id' IS NOT NULL
+            AND metadata->>'court_id' != 'Unknown'
+            GROUP BY metadata->>'court_id'
+            ORDER BY COUNT(*) DESC
+            LIMIT 5
+        """)
+
+        top_courts = [{"court_id": row['court_id'], "documents": row['doc_count']}
+                     for row in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+
+        return {
+            "total_documents": stats['total_documents'],
+            "substantial_documents": stats['substantial_documents'],
+            "very_long_documents": stats['very_long_documents'],
+            "unique_judges": stats['unique_judges'],
+            "unique_courts": stats['unique_courts'],
+            "total_characters": stats['total_characters'],
+            "avg_document_length": stats['avg_document_length'],
+            "top_judges": top_judges,
+            "top_courts": top_courts,
+            "data_quality": {
+                "substantial_ratio": round(stats['substantial_documents'] / max(stats['total_documents'], 1), 3),
+                "very_long_ratio": round(stats['very_long_documents'] / max(stats['total_documents'], 1), 3)
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get summary stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sample")

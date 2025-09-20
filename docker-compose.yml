@@ -27,16 +27,28 @@ services:
       POSTGRES_PASSWORD: "${DB_PASSWORD}"  # Use environment variable
       POSTGRES_USER: "${DB_USER}"          # Use environment variable
       POSTGRES_DB: "${DB_NAME}"            # Use environment variable
+      # PostgreSQL memory tuning for limited resources
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 512MB
+      POSTGRES_WORK_MEM: 4MB
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/01-init-databases.sh
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   n8n:
     build:
@@ -48,16 +60,20 @@ services:
       - N8N_HOST=${SERVICE_HOST:-0.0.0.0}
       - N8N_PORT=5678
       - NODE_ENV=production
-      - N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY}"  # Use environment variable
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_AUTH_EXCLUDE_ENDPOINTS=rest,healthz,metrics,webhook,webhook-test
       - N8N_RUNNERS_ENABLED=true
       - N8N_CORS_ENABLED=true
       - N8N_CORS_ALLOW_ORIGIN="${N8N_CORS_ORIGIN:-http://localhost:8080}"
       # Enable public API access (for dev environment)
       - N8N_PUBLIC_API_DISABLED=false
       - N8N_PUBLIC_API_SWAGGERUI_DISABLED=false
+      # Auth configuration - Enable auth but exclude webhooks
+      - N8N_USER_MANAGEMENT_DISABLED=false
+      - N8N_AUTH_ENABLED=true
       # Auto-setup configuration
-      - N8N_SETUP_EMAIL=${N8N_SETUP_EMAIL:-admin@aletheia.local}
+      - N8N_SETUP_EMAIL=${N8N_SETUP_EMAIL:-velvetmoon222999@gmail.com}
       - N8N_SETUP_PASSWORD=${N8N_SETUP_PASSWORD:-admin123}
       - N8N_SETUP_FIRSTNAME=${N8N_SETUP_FIRSTNAME:-Admin}
       - N8N_SETUP_LASTNAME=${N8N_SETUP_LASTNAME:-User}
@@ -88,26 +104,45 @@ services:
       - NEXT_PUBLIC_WEB_URL=${NEXT_PUBLIC_WEB_URL}
       - NEXT_PUBLIC_AI_PORTAL_URL=${NEXT_PUBLIC_AI_PORTAL_URL}
       - N8N_WEBHOOK_ID=${N8N_WEBHOOK_ID}
+      # API Keys for credential setup (passed through securely)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Node.js memory limit
+      - NODE_OPTIONS=--max-old-space-size=768
     volumes:
-      - n8n_data:/data
+      # No persistent data volume - n8n initializes fresh each time
+      # This prevents encryption key conflicts and stale state issues
       - ./n8n/local-files:/files
+      - ./workflow_json:/workflow_json:ro
+      - ./n8n/scripts:/scripts:ro
+      # Custom nodes are restored at runtime from global node_modules
+    tmpfs:
+      - /data:uid=${N8N_CONTAINER_UID:-1000},gid=${N8N_CONTAINER_GID:-1000}
     networks:
       - backend
       - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
       interval: 30s
-      timeout: 10s
-      retries: 3
+      timeout: 20s
+      retries: 10
+      start_period: 60s
 
   court-processor:
     build:
       context: ./court-processor
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      # Use individual DB variables to avoid password escaping issues
       PYTHONPATH: /app
-      COURTLISTENER_API_TOKEN: ${COURTLISTENER_API_TOKEN}
+      COURTLISTENER_API_KEY: ${COURTLISTENER_API_KEY}
       PACER_USERNAME: ${PACER_USERNAME}
       PACER_PASSWORD: ${PACER_PASSWORD}
       RECAP_WEBHOOK_URL: http://recap-webhook:5000/webhook/recap-fetch
@@ -129,6 +164,13 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8104/"]
       interval: 30s
@@ -141,7 +183,7 @@ services:
   #     context: ./court-processor/api
   #     dockerfile: Dockerfile
   #   environment:
-  #     COURTLISTENER_API_TOKEN: ${COURTLISTENER_API_TOKEN}
+  #     COURTLISTENER_API_KEY: ${COURTLISTENER_API_KEY}
   #     RECAP_DOWNLOAD_DIR: /data/recap_downloads
   #     RECAP_WEBHOOK_SECRET: ${RECAP_WEBHOOK_SECRET}
   #     FLASK_ENV: production
@@ -173,7 +215,14 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - HOSTNAME=${SERVICE_HOST:-0.0.0.0}
+      # Direct DATABASE_URL for Prisma
       - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/lawyerchat
+      # Keep individual vars for other uses
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=lawyerchat
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - NEXTAUTH_URL=http://localhost:${WEB_PORT}/chat
       - NEXT_PUBLIC_NEXTAUTH_URL=http://localhost:${WEB_PORT}/chat
@@ -187,7 +236,7 @@ services:
       - N8N_API_SECRET=${N8N_API_SECRET}
       - N8N_AUTH_BYPASS=${N8N_AUTH_BYPASS:-false}
       # Court Processor API config
-      - COURT_API_BASE_URL=${COURT_API_BASE_URL}
+      - COURT_API_BASE_URL=http://court-processor:8104
       - NEXT_PUBLIC_COURT_API_URL=${NEXT_PUBLIC_COURT_API_URL}
       - NEXT_PUBLIC_MAX_DOCUMENT_SELECTIONS=${NEXT_PUBLIC_MAX_DOCUMENT_SELECTIONS}
       - NEXT_PUBLIC_ENABLE_DOCUMENT_SELECTION=${NEXT_PUBLIC_ENABLE_DOCUMENT_SELECTION}
@@ -209,6 +258,13 @@ services:
     networks:
       - backend
       - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/chat"]
       interval: 30s
@@ -261,9 +317,16 @@ services:
       - "${REDIS_PORT}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '1'
+        reservations:
+          memory: 128M
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -291,10 +354,91 @@ services:
       timeout: 10s
       retries: 3
 
+  # Elasticsearch for document indexing and search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.1
+    container_name: elasticsearch-judicial
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - http.host=0.0.0.0
+      - transport.host=127.0.0.1
+      - network.host=0.0.0.0
+      - cluster.name=judicial-cluster
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+      - "${ELASTICSEARCH_CLUSTER_PORT:-9300}:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 768M
+
+  # Haystack RAG service for document processing
+  haystack-service:
+    build:
+      context: ./n8n/haystack-service
+      dockerfile: Dockerfile
+    container_name: haystack-judicial
+    ports:
+      - "${HAYSTACK_PORT:-8000}:8000"
+    environment:
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - HAYSTACK_MODE=unified
+      - ENABLE_POSTGRESQL=true
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - ELASTICSEARCH_INDEX=legal-documents-rag
+    depends_on:
+      db:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - haystack_models:/app/models
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # Unstructured service for document parsing
+  unstructured-service:
+    build:
+      context: .
+      dockerfile: ./n8n/unstructured-service/Dockerfile
+    container_name: unstructured-judicial
+    ports:
+      - "${UNSTRUCTURED_PORT:-8880}:8880"
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    networks:
+      - backend
+    restart: unless-stopped
+
 volumes:
   postgres_data:
-  n8n_data:
+  # n8n_data removed - using tmpfs mount instead for ephemeral storage
   redis_data:
+  elasticsearch_data:
+    driver: local
+  haystack_models:
+    driver: local
 
 networks:
   frontend:

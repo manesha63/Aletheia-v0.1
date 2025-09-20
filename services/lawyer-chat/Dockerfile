@@ -101,4 +101,4 @@ EXPOSE 3000
 
 ENV PORT 3000
 
-CMD ["./scripts/docker-entrypoint.sh"]
+ENTRYPOINT ["./scripts/docker-entrypoint.sh"]

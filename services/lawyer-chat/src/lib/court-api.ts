@@ -88,6 +88,59 @@ class CourtAPIClient {
     }
     return response.json();
   }
+
+  async getAvailableJudges(minDocs = 5): Promise<{
+    judges: Array<{
+      name: string;
+      full_name: string;
+      court: string;
+      total_documents: number;
+      substantial_documents: number;
+    }>;
+    total_judges: number;
+  }> {
+    const response = await fetch(`${this.getUrl()}/api/judges?min_docs=${minDocs}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch judges: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getAvailableCourts(minDocs = 10): Promise<{
+    courts: Array<{
+      court_id: string;
+      name: string;
+      total_documents: number;
+      substantial_documents: number;
+      judge_count: number;
+    }>;
+    total_courts: number;
+  }> {
+    const response = await fetch(`${this.getUrl()}/api/courts?min_docs=${minDocs}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch courts: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getDataSummary(): Promise<{
+    total_documents: number;
+    substantial_documents: number;
+    unique_judges: number;
+    unique_courts: number;
+    top_judges: Array<{ name: string; documents: number }>;
+    top_courts: Array<{ court_id: string; documents: number }>;
+    data_quality: {
+      substantial_ratio: number;
+      very_long_ratio: number;
+    };
+  }> {
+    const response = await fetch(`${this.getUrl()}/api/stats/summary`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch data summary: ${response.statusText}`);
+    }
+    return response.json();
+  }
 }
 
 export const courtAPI = new CourtAPIClient();

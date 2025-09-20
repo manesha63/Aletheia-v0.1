@@ -2,20 +2,26 @@ FROM n8nio/n8n:1.99.1
 
 USER root
 
-# Install build tools needed for some npm packages
+# Install build tools needed for some npm packages and TypeScript compilation
 RUN apk add --no-cache --virtual .build-deps \
     python3 \
     make \
-    g++
+    g++ \
+    nodejs \
+    npm
+
+# Install global tools and types needed for custom node builds
+RUN npm install -g typescript gulp-cli @types/node n8n-workflow pg uuid @types/pg @types/uuid
 
 # Install runtime tools we need
 RUN apk add --no-cache \
     sqlite \
     curl \
-    jq
+    jq \
+    openssl
 
 # Create directories
-RUN mkdir -p /data
+RUN mkdir -p /data /scripts
 
 # Copy custom nodes directly to node_modules with proper names
 COPY ./n8n/custom-nodes/n8n-nodes-hierarchicalSummarization /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization
@@ -23,25 +29,31 @@ COPY ./n8n/custom-nodes/n8n-nodes-haystack /usr/local/lib/node_modules/n8n-nodes
 COPY ./n8n/custom-nodes/n8n-nodes-citationchecker /usr/local/lib/node_modules/n8n-nodes-citationchecker
 COPY ./n8n/custom-nodes/n8n-nodes-deepseek /usr/local/lib/node_modules/n8n-nodes-deepseek
 COPY ./n8n/custom-nodes/n8n-nodes-yake /usr/local/lib/node_modules/n8n-nodes-yake
-COPY ./n8n/custom-nodes/n8n-nodes-bitnet /usr/local/lib/node_modules/n8n-nodes-bitnet
-COPY ./n8n/custom-nodes/n8n-nodes-unstructured /usr/local/lib/node_modules/n8n-nodes-unstructured
 COPY ./n8n/custom-nodes/n8n-nodes-citation-gen /usr/local/lib/node_modules/n8n-nodes-citation-gen
-COPY ./n8n/custom-nodes/n8n-nodes-ollama-advanced /usr/local/lib/node_modules/n8n-nodes-ollama-advanced
+# BitNet node archived - removed from build due to dependency issues
 
 # Remove preinstall script from deepseek and ollama-advanced that requires pnpm
 RUN sed -i '/"preinstall":/d' /usr/local/lib/node_modules/n8n-nodes-deepseek/package.json && \
     sed -i '/"preinstall":/d' /usr/local/lib/node_modules/n8n-nodes-ollama-advanced/package.json
 
-# Install dependencies for each custom node
-RUN cd /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-haystack && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-citationchecker && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-deepseek && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-yake && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-bitnet && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-unstructured && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-citation-gen && npm install --production --no-save && \
-    cd /usr/local/lib/node_modules/n8n-nodes-ollama-advanced && npm install --production --no-save
+# Install dependencies and build custom nodes with error tolerance
+RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \
+        echo "Building $(basename $node_dir)..."; \
+        cd "$node_dir" && \
+        npm install && \
+        npm install gulp --save-dev && \
+        (npm run build || echo "Warning: Build had errors for $(basename $node_dir), continuing..."); \
+    done
+
+# Ensure icons are copied to dist directories (backup for failed gulp builds)
+RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \
+        echo "Copying icons for $(basename $node_dir)..."; \
+        if [ -d "$node_dir/nodes" ] && [ -d "$node_dir/dist/nodes" ]; then \
+            find "$node_dir/nodes" -name "*.svg" -o -name "*.png" | while read icon_file; do \
+                cp "$icon_file" "$node_dir/dist/nodes/" 2>/dev/null || true; \
+            done; \
+        fi; \
+    done
 
 # Clean up build dependencies
 RUN apk del .build-deps
@@ -50,16 +62,16 @@ RUN apk del .build-deps
 # n8n v1.100.1 expects custom nodes in the user folder
 RUN mkdir -p /data/.n8n/custom
 
-# Copy the complete node packages with correct structure
-RUN cp -r /usr/local/lib/node_modules/n8n-nodes-hierarchicalSummarization /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-haystack /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-citationchecker /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-deepseek /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-yake /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-bitnet /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-unstructured /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-citation-gen /data/.n8n/custom/ && \
-    cp -r /usr/local/lib/node_modules/n8n-nodes-ollama-advanced /data/.n8n/custom/
+# Copy only essential files for n8n custom nodes (not entire node_modules)
+RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \
+        node_name=$(basename "$node_dir"); \
+        echo "Copying essential files for $node_name..."; \
+        mkdir -p "/data/.n8n/custom/$node_name"; \
+        cp "$node_dir/package.json" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+        cp -r "$node_dir/dist" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+        cp -r "$node_dir/nodes" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+        cp -r "$node_dir/credentials" "/data/.n8n/custom/$node_name/" 2>/dev/null || true; \
+    done
 
 # Set proper ownership for all n8n directories
 RUN chown -R node:node /data
@@ -67,7 +79,21 @@ RUN chown -R node:node /data
 # Copy helper scripts while still as root
 COPY ./n8n/scripts/n8n-exec.sh /usr/local/bin/n8n-exec
 COPY ./n8n/scripts/auto-setup.sh /usr/local/bin/auto-setup
-RUN chmod +x /usr/local/bin/n8n-exec /usr/local/bin/auto-setup
+COPY ./n8n/scripts/setup-credentials.sh /usr/local/bin/setup-credentials
+COPY ./n8n/scripts/dev-startup.sh /usr/local/bin/dev-startup
+COPY ./n8n/scripts/import-workflows.sh /usr/local/bin/import-workflows
+COPY ./n8n/scripts/auto-login.sh /usr/local/bin/auto-login
+RUN chmod +x /usr/local/bin/n8n-exec /usr/local/bin/auto-setup /usr/local/bin/setup-credentials /usr/local/bin/dev-startup /usr/local/bin/import-workflows /usr/local/bin/auto-login
+
+# Also copy scripts to /scripts directory for single-startup.sh
+COPY ./n8n/scripts/*.sh /scripts/
+RUN chmod +x /scripts/*.sh
+
+# Create workflows directory and copy workflow files
+# Don't bake workflows into image - use mounted volume at runtime
+# RUN mkdir -p /workflows
+# COPY ./workflow_json/*.json /workflows/
+# RUN chown -R node:node /workflows
 
 USER node
 
@@ -75,9 +101,10 @@ ENV N8N_USER_FOLDER=/data
 ENV NODE_PATH=/usr/local/lib/node_modules:/usr/lib/node_modules
 ENV N8N_CUSTOM_EXTENSIONS=/data/.n8n/custom
 
-# Copy the fix script
+# Copy the fix script and entrypoint (v2 - fixed to not exec n8n)
 COPY --chown=node:node ./n8n/fix-custom-nodes.sh /fix-custom-nodes.sh
-RUN chmod +x /fix-custom-nodes.sh
+COPY --chown=node:node ./n8n/entrypoint.sh /entrypoint.sh
+RUN chmod +x /fix-custom-nodes.sh /entrypoint.sh
 
-# Use our custom entrypoint that fixes nodes before starting
-ENTRYPOINT ["tini", "--", "/fix-custom-nodes.sh"]
+# Use simplified entrypoint
+ENTRYPOINT ["tini", "--", "/entrypoint.sh"]

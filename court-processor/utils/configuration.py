@@ -310,7 +310,7 @@ class Settings:
     
     def _load_service_config(self):
         """Load service configuration from environment"""
-        self.services.courtlistener_api_key = os.getenv("COURTLISTENER_API_TOKEN")
+        self.services.courtlistener_api_key = os.getenv("COURTLISTENER_API_KEY")
         self.services.courtlistener_base_url = os.getenv("COURTLISTENER_URL", self.services.courtlistener_base_url)
         self.services.courtlistener_timeout = int(os.getenv("COURTLISTENER_TIMEOUT", "30"))
         

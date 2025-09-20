@@ -31,12 +31,12 @@ async def test_recap_fetch():
     """Test RECAP Fetch API functionality"""
     
     # Get credentials from environment
-    cl_token = os.getenv('COURTLISTENER_API_KEY') or os.getenv('COURTLISTENER_API_TOKEN')
+    cl_token = os.getenv('COURTLISTENER_API_KEY')
     pacer_username = os.getenv('PACER_USERNAME')
     pacer_password = os.getenv('PACER_PASSWORD')
     
     if not cl_token:
-        logger.error("Missing COURTLISTENER_API_KEY or COURTLISTENER_API_TOKEN")
+        logger.error("Missing COURTLISTENER_API_KEY")
         return
     
     if not pacer_username or not pacer_password:
@@ -214,7 +214,7 @@ async def test_small_batch():
     logger.info("="*60)
     
     # Get credentials
-    cl_token = os.getenv('COURTLISTENER_API_KEY') or os.getenv('COURTLISTENER_API_TOKEN')
+    cl_token = os.getenv('COURTLISTENER_API_KEY')
     pacer_username = os.getenv('PACER_USERNAME')
     pacer_password = os.getenv('PACER_PASSWORD')
     
@@ -223,7 +223,7 @@ async def test_small_batch():
         return
     
     # First, search for recent patent cases in E.D. Texas
-    from services.courtlistener_service import CourtListenerService
+    from services.courtlistener import CourtListenerService
     
     cl_service = CourtListenerService(cl_token)
     

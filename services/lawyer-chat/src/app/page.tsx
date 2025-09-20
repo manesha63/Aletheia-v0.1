@@ -345,16 +345,11 @@ function LawyerChatContent() {
                 paddingLeft: inputPadding,
                 paddingRight: inputPadding,
               }}>
-                <h2 className="font-medium text-center" style={{ 
-                  color: isDarkMode ? '#9CA3AF' : '#E1C88E',
-                  fontSize: '2.52rem', // 3.6rem (text-6xl) * 0.7
-                  marginBottom: '1rem'
-                }}>Judicial Access Project</h2>
                 <p className="text-center" style={{
-                  color: isDarkMode ? '#6B7280' : '#9CA3AF',
-                  fontSize: '1.125rem', // text-lg
+                  color: isDarkMode ? '#9CA3AF' : '#E1C88E',
+                  fontSize: '1rem', // 16px - similar to input text size
                   marginBottom: 'calc(125px + 2cm + 3cm)' // Input height (125px) + 2cm gap + 3cm additional
-                }}>Bridge the vast landscape of judicial transcript data with targeted AI retrieval and citation</p>
+                }}>Aletheia (/ælɪˈθaɪ.ə/): truth or disclosure, unhiddenness. The antonym of lethe (forgetfulness).</p>
               </div>
             </div>
           )}

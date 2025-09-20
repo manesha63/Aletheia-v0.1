@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, FileText, X, Loader2, AlertCircle, Gavel, FileAudio, Search } from 'lucide-react';
 import { getDocumentSource, documentSourceRegistry } from '@/lib/document-sources/registry';
 import { CourtDocument } from '@/types/court-documents';
+import { courtAPI } from '@/lib/court-api';
 import { cn } from '@/lib/utils';
 
 interface DocumentCabinetProps {
@@ -24,13 +25,42 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-  const [judges, setJudges] = useState<JudgeData[]>([
-    { name: 'Gilstrap', documents: [], isExpanded: false, isLoading: false },
-    { name: 'Albright', documents: [], isExpanded: false, isLoading: false }
-  ]);
+  const [judges, setJudges] = useState<JudgeData[]>([]);
+  const [judgesLoading, setJudgesLoading] = useState(true);
+  const [judgesError, setJudgesError] = useState<string | null>(null);
   const [selectedDocIds, setSelectedDocIds] = useState<Set<number>>(new Set());
   const [hoveredDocId, setHoveredDocId] = useState<number | null>(null);
   const [loadingDocuments, setLoadingDocuments] = useState<Set<number>>(new Set());
+
+  // Load available judges on component mount
+  useEffect(() => {
+    const loadJudges = async () => {
+      try {
+        setJudgesLoading(true);
+        setJudgesError(null);
+        const response = await courtAPI.getAvailableJudges(5); // Minimum 5 docs per judge
+
+        const judgeList: JudgeData[] = response.judges.map(judge => ({
+          name: judge.name,
+          documents: [],
+          isExpanded: false,
+          isLoading: false
+        }));
+
+        setJudges(judgeList);
+      } catch (error: any) {
+        console.error('Failed to load judges:', error);
+        const errorMessage = error?.message?.includes('Court API not configured')
+          ? 'Document selection is not available. Please contact your administrator.'
+          : 'Failed to load available judges';
+        setJudgesError(errorMessage);
+      } finally {
+        setJudgesLoading(false);
+      }
+    };
+
+    loadJudges();
+  }, []);
 
   // Load documents for a judge when their dropdown is expanded
   const loadJudgeDocuments = useCallback(async (judgeName: string) => {
@@ -42,7 +72,6 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
       const source = getDocumentSource('court');
       const response = await source.searchDocuments({
         category: judgeName,
-        type: '020lead',
         limit: 50,
         min_length: 5000
       });
@@ -298,7 +327,24 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
                 "border-t",
                 isDarkMode ? "border-gray-700" : "border-gray-200"
               )}>
-                {judges.map((judge) => (
+                {judgesLoading ? (
+                  <div className="p-4 text-center">
+                    <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                    <p className="text-sm mt-2 opacity-60">Loading judges...</p>
+                  </div>
+                ) : judgesError ? (
+                  <div className="p-4 text-center">
+                    <div className="text-red-500 mb-2">
+                      <AlertCircle className="w-5 h-5 mx-auto" />
+                    </div>
+                    <p className="text-sm text-red-500">{judgesError}</p>
+                  </div>
+                ) : judges.length === 0 ? (
+                  <div className="p-4 text-center text-sm opacity-60">
+                    No judges available
+                  </div>
+                ) : (
+                  judges.map((judge) => (
             <div key={judge.name} className="border rounded-lg overflow-hidden">
               {/* Judge header */}
               <button
@@ -405,7 +451,8 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
                 </div>
               )}
             </div>
-          ))}
+          ))
+                )}
               </div>
             )}
           </div>

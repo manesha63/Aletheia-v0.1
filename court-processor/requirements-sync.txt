@@ -1,0 +1,19 @@
+# Requirements for Direct Elasticsearch Sync Service
+# Replaces Haystack middleware with lightweight dependencies
+
+# Database connectivity
+psycopg2-binary==2.9.9
+
+# Elasticsearch client
+elasticsearch==8.11.1
+
+# Embedding generation
+sentence-transformers>=2.3.0
+torch>=1.9.0
+huggingface-hub<0.20
+
+# Data processing
+numpy>=1.21.0
+
+# Utilities (if not already available)
+python-dotenv>=0.19.0

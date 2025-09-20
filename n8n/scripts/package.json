@@ -1,0 +1,23 @@
+{
+  "name": "n8n-credential-scripts",
+  "version": "1.0.0",
+  "description": "TypeScript-based credential testing scripts for n8n",
+  "main": "test-connection.js",
+  "scripts": {
+    "build": "tsc --build",
+    "build:watch": "tsc --build --watch",
+    "test": "node test-connection.js",
+    "clean": "rm -f *.js *.d.ts *.map"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

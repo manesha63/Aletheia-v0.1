@@ -1,8 +1,11 @@
 #!/bin/sh
 
+# DATABASE_URL is now set directly in docker-compose.yml
+echo "Starting with DATABASE_URL: ${DATABASE_URL%%@*}@****"
+
 echo "Waiting for database to be ready..."
 # Use node to run prisma directly since npx may not be available in standalone build
-until node node_modules/prisma/build/index.js db push --skip-generate 2>/dev/null || node node_modules/@prisma/cli/build/index.js db push --skip-generate 2>/dev/null; do
+until node node_modules/prisma/build/index.js db push --skip-generate || node node_modules/@prisma/cli/build/index.js db push --skip-generate 2>/dev/null; do
   echo "Database is unavailable - sleeping"
   sleep 5
 done

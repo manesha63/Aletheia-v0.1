@@ -30,18 +30,32 @@ class ResourceInfo:
     auto_cleanup: bool = True
 
 class ResourceTracker:
-    """Tracks and manages cleanup of all resources"""
+    """Tracks and manages cleanup of all resources with thread-safe operations"""
 
     def __init__(self):
         self._resources: Dict[str, ResourceInfo] = {}
-        self._lock = threading.Lock()
-        self._shutdown_initiated = False
+        self._lock = threading.RLock()  # Use RLock for reentrant locking
+        self._shutdown_lock = threading.Lock()  # Separate lock for shutdown
+        self._shutdown_initiated = threading.Event()  # Atomic flag for shutdown state
         self._cleanup_handlers = []
+        self._signal_handlers_registered = False
+        self._cleanup_timeout = 30  # seconds
 
-        # Register signal handlers for graceful shutdown
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        signal.signal(signal.SIGINT, self._signal_handler)
-        atexit.register(self.cleanup_all)
+        # Register signal handlers for graceful shutdown (thread-safe)
+        self._register_signal_handlers()
+        atexit.register(self._atexit_handler)
+
+    def _register_signal_handlers(self):
+        """Thread-safe signal handler registration"""
+        with self._shutdown_lock:
+            if not self._signal_handlers_registered:
+                try:
+                    signal.signal(signal.SIGTERM, self._signal_handler)
+                    signal.signal(signal.SIGINT, self._signal_handler)
+                    self._signal_handlers_registered = True
+                except Exception as e:
+                    # Signal registration can fail in some contexts (e.g., threads)
+                    logger.debug(f"Could not register signal handlers: {e}")
 
     def register_resource(
         self,
@@ -52,8 +66,14 @@ class ResourceTracker:
         auto_cleanup: bool = True
     ):
         """Register a resource for tracking and cleanup"""
+        # Check shutdown flag without acquiring lock first (optimization)
+        if self._shutdown_initiated.is_set():
+            logger.warning(f"Cannot register resource {name} during shutdown")
+            return
+
         with self._lock:
-            if self._shutdown_initiated:
+            # Double-check after acquiring lock
+            if self._shutdown_initiated.is_set():
                 logger.warning(f"Cannot register resource {name} during shutdown")
                 return
 
@@ -80,57 +100,123 @@ class ResourceTracker:
             if name not in self._resources:
                 return False
 
-            resource_info = self._resources[name]
-            try:
-                resource_info.cleanup_func()
-                logger.info(f"Cleaned up resource: {name}")
-                del self._resources[name]
-                return True
-            except Exception as e:
-                logger.error(f"Failed to cleanup resource {name}: {e}")
+            resource_info = self._resources.pop(name, None)
+            if not resource_info:
                 return False
 
-    def cleanup_all(self):
-        """Cleanup all registered resources"""
-        if self._shutdown_initiated:
+        # Perform cleanup outside of lock to prevent deadlocks
+        try:
+            resource_info.cleanup_func()
+            logger.info(f"Cleaned up resource: {name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to cleanup resource {name}: {e}")
+            return False
+
+    def cleanup_all(self, timeout: Optional[float] = None):
+        """Cleanup all registered resources with timeout and thread safety"""
+        # Use atomic operation to check and set shutdown flag
+        if self._shutdown_initiated.is_set():
+            logger.debug("Cleanup already initiated, skipping duplicate call")
             return
 
-        self._shutdown_initiated = True
+        with self._shutdown_lock:
+            # Double-check after acquiring lock
+            if self._shutdown_initiated.is_set():
+                return
+
+            # Atomically set shutdown flag
+            self._shutdown_initiated.set()
+
         logger.info("Starting resource cleanup...")
 
+        # Use timeout if provided, otherwise use default
+        cleanup_timeout = timeout or self._cleanup_timeout
+        start_time = time.time()
+
+        # Get resources to cleanup (snapshot to avoid holding lock)
         with self._lock:
-            # Cleanup in reverse order of registration
             resources_to_cleanup = list(self._resources.values())
-            resources_to_cleanup.reverse()
+            resources_to_cleanup.reverse()  # Cleanup in reverse order
 
-            for resource_info in resources_to_cleanup:
-                if resource_info.auto_cleanup:
-                    try:
-                        resource_info.cleanup_func()
-                        logger.debug(f"Cleaned up: {resource_info.name}")
-                    except Exception as e:
-                        logger.error(f"Cleanup failed for {resource_info.name}: {e}")
+        # Cleanup resources with timeout check
+        for resource_info in resources_to_cleanup:
+            if time.time() - start_time > cleanup_timeout:
+                logger.warning(f"Cleanup timeout reached, skipping remaining resources")
+                break
 
+            if resource_info.auto_cleanup:
+                try:
+                    # Create a thread for each cleanup with its own timeout
+                    cleanup_thread = threading.Thread(
+                        target=self._cleanup_with_timeout,
+                        args=(resource_info,),
+                        daemon=True
+                    )
+                    cleanup_thread.start()
+                    cleanup_thread.join(timeout=min(5.0, cleanup_timeout - (time.time() - start_time)))
+
+                    if cleanup_thread.is_alive():
+                        logger.warning(f"Cleanup timeout for {resource_info.name}, continuing...")
+                except Exception as e:
+                    logger.error(f"Cleanup failed for {resource_info.name}: {e}")
+
+        # Clear remaining resources
+        with self._lock:
             self._resources.clear()
 
-        # Run additional cleanup handlers
-        for handler in self._cleanup_handlers:
-            try:
-                handler()
-            except Exception as e:
-                logger.error(f"Cleanup handler failed: {e}")
+        # Run additional cleanup handlers with timeout
+        remaining_time = cleanup_timeout - (time.time() - start_time)
+        if remaining_time > 0:
+            for handler in self._cleanup_handlers:
+                try:
+                    handler_thread = threading.Thread(target=handler, daemon=True)
+                    handler_thread.start()
+                    handler_thread.join(timeout=min(2.0, remaining_time))
+
+                    if handler_thread.is_alive():
+                        logger.warning(f"Cleanup handler timeout, continuing...")
+                except Exception as e:
+                    logger.error(f"Cleanup handler failed: {e}")
 
         logger.info("Resource cleanup completed")
 
+    def _cleanup_with_timeout(self, resource_info: ResourceInfo):
+        """Execute cleanup function with error handling"""
+        try:
+            resource_info.cleanup_func()
+            logger.debug(f"Cleaned up: {resource_info.name}")
+        except Exception as e:
+            logger.error(f"Cleanup failed for {resource_info.name}: {e}")
+
     def add_cleanup_handler(self, handler: callable):
         """Add a custom cleanup handler"""
-        self._cleanup_handlers.append(handler)
+        with self._lock:
+            self._cleanup_handlers.append(handler)
 
     def _signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
+        """Handle shutdown signals in a thread-safe manner"""
+        # Avoid recursive signal handling
+        signal.signal(signum, signal.SIG_DFL)
+
         logger.info(f"Received signal {signum}, initiating cleanup...")
-        self.cleanup_all()
+
+        # Start cleanup in a separate thread to avoid signal handler limitations
+        cleanup_thread = threading.Thread(target=self.cleanup_all, daemon=False)
+        cleanup_thread.start()
+
+        # Wait for cleanup with timeout
+        cleanup_thread.join(timeout=self._cleanup_timeout)
+
+        if cleanup_thread.is_alive():
+            logger.error("Cleanup timeout exceeded, forcing exit")
+
         sys.exit(0)
+
+    def _atexit_handler(self):
+        """Handler for atexit - ensures cleanup even without signals"""
+        if not self._shutdown_initiated.is_set():
+            self.cleanup_all(timeout=10)  # Shorter timeout for atexit
 
     def get_resource_summary(self) -> Dict[str, Any]:
         """Get summary of all tracked resources"""
@@ -138,7 +224,8 @@ class ResourceTracker:
             summary = {
                 "total_resources": len(self._resources),
                 "by_type": {},
-                "resources": []
+                "resources": [],
+                "shutdown_initiated": self._shutdown_initiated.is_set()
             }
 
             for name, info in self._resources.items():
@@ -155,11 +242,21 @@ class ResourceTracker:
 
             return summary
 
-# Global resource tracker
-_resource_tracker = ResourceTracker()
+    def is_shutting_down(self) -> bool:
+        """Check if shutdown is in progress"""
+        return self._shutdown_initiated.is_set()
+
+# Global resource tracker with thread-safe singleton pattern
+_resource_tracker_lock = threading.Lock()
+_resource_tracker = None
 
 def get_resource_tracker() -> ResourceTracker:
-    """Get the global resource tracker"""
+    """Get the global resource tracker (thread-safe singleton)"""
+    global _resource_tracker
+    if _resource_tracker is None:
+        with _resource_tracker_lock:
+            if _resource_tracker is None:
+                _resource_tracker = ResourceTracker()
     return _resource_tracker
 
 @asynccontextmanager
@@ -170,20 +267,26 @@ async def elasticsearch_connection_manager(
     """
     Context manager for Elasticsearch connections with automatic cleanup
     """
+    tracker = get_resource_tracker()
+
     def cleanup_es():
         try:
             if hasattr(es_client, 'close'):
                 # For async ES client
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.create_task(es_client.close())
-                else:
-                    loop.run_until_complete(es_client.close())
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(es_client.close())
+                    else:
+                        asyncio.run_coroutine_threadsafe(es_client.close(), loop)
+                except Exception:
+                    # Fallback for sync close
+                    es_client.close()
             logger.debug(f"Elasticsearch connection {connection_name} closed")
         except Exception as e:
             logger.error(f"Failed to close ES connection {connection_name}: {e}")
 
-    _resource_tracker.register_resource(
+    tracker.register_resource(
         connection_name,
         es_client,
         cleanup_es,
@@ -194,7 +297,7 @@ async def elasticsearch_connection_manager(
         yield es_client
     finally:
         cleanup_es()
-        _resource_tracker.unregister_resource(connection_name)
+        tracker.unregister_resource(connection_name)
 
 @asynccontextmanager
 async def scroll_context_manager(
@@ -205,6 +308,8 @@ async def scroll_context_manager(
     """
     Context manager for Elasticsearch scroll operations with guaranteed cleanup
     """
+    tracker = get_resource_tracker()
+
     async def cleanup_scroll():
         try:
             if scroll_id:
@@ -213,7 +318,7 @@ async def scroll_context_manager(
         except Exception as e:
             logger.error(f"Failed to clear scroll {scroll_name}: {e}")
 
-    _resource_tracker.register_resource(
+    tracker.register_resource(
         f"scroll_{scroll_name}",
         scroll_id,
         lambda: asyncio.create_task(cleanup_scroll()),
@@ -224,7 +329,7 @@ async def scroll_context_manager(
         yield scroll_id
     finally:
         await cleanup_scroll()
-        _resource_tracker.unregister_resource(f"scroll_{scroll_name}")
+        tracker.unregister_resource(f"scroll_{scroll_name}")
 
 @contextmanager
 def process_pool_manager(
@@ -236,15 +341,22 @@ def process_pool_manager(
     """
     Context manager for process pools with automatic cleanup
     """
+    tracker = get_resource_tracker()
     pool = None
 
     def cleanup_pool():
         if pool:
             try:
-                pool.shutdown(wait=True)
+                # Shutdown with timeout
+                pool.shutdown(wait=True, timeout=10)
                 logger.debug(f"Process pool {pool_name} shutdown")
             except Exception as e:
                 logger.error(f"Failed to shutdown pool {pool_name}: {e}")
+                # Force shutdown if graceful fails
+                try:
+                    pool.shutdown(wait=False)
+                except Exception:
+                    pass
 
     try:
         pool = concurrent.futures.ProcessPoolExecutor(
@@ -253,7 +365,7 @@ def process_pool_manager(
             initargs=initargs
         )
 
-        _resource_tracker.register_resource(
+        tracker.register_resource(
             f"pool_{pool_name}",
             pool,
             cleanup_pool,
@@ -264,7 +376,7 @@ def process_pool_manager(
 
     finally:
         cleanup_pool()
-        _resource_tracker.unregister_resource(f"pool_{pool_name}")
+        tracker.unregister_resource(f"pool_{pool_name}")
 
 @asynccontextmanager
 async def analytics_service_context(
@@ -275,6 +387,8 @@ async def analytics_service_context(
     """
     Comprehensive context manager for analytics services
     """
+    tracker = get_resource_tracker()
+
     resources = {
         "es_client": es_client,
         "service_name": service_name,
@@ -285,7 +399,7 @@ async def analytics_service_context(
     def cleanup_service():
         logger.debug(f"Analytics service {service_name} context cleaned up")
 
-    _resource_tracker.register_resource(
+    tracker.register_resource(
         f"service_{service_name}",
         resources,
         cleanup_service,
@@ -297,7 +411,7 @@ async def analytics_service_context(
             yield resources
     finally:
         cleanup_service()
-        _resource_tracker.unregister_resource(f"service_{service_name}")
+        tracker.unregister_resource(f"service_{service_name}")
 
 @asynccontextmanager
 async def batch_processing_context(
@@ -309,6 +423,7 @@ async def batch_processing_context(
     """
     Context manager for batch processing operations with error handling
     """
+    tracker = get_resource_tracker()
     processed_batches = []
     failed_batches = []
 
@@ -332,7 +447,7 @@ async def batch_processing_context(
             f"{total_failed} failed"
         )
 
-    _resource_tracker.register_resource(
+    tracker.register_resource(
         f"batch_op_{operation_name}",
         {"processed": processed_batches, "failed": failed_batches},
         cleanup_operation,
@@ -343,7 +458,7 @@ async def batch_processing_context(
         yield tracked_batch_processor
     finally:
         cleanup_operation()
-        _resource_tracker.unregister_resource(f"batch_op_{operation_name}")
+        tracker.unregister_resource(f"batch_op_{operation_name}")
 
 class ManagedAnalyticsService:
     """
@@ -408,27 +523,32 @@ class ManagedAnalyticsService:
 # Convenience functions
 def register_cleanup_handler(handler: callable):
     """Register a custom cleanup handler"""
-    _resource_tracker.add_cleanup_handler(handler)
+    get_resource_tracker().add_cleanup_handler(handler)
 
 def force_cleanup_all():
     """Force cleanup of all resources"""
-    _resource_tracker.cleanup_all()
+    get_resource_tracker().cleanup_all()
 
 def get_resource_summary() -> Dict[str, Any]:
     """Get summary of all managed resources"""
-    return _resource_tracker.get_resource_summary()
+    return get_resource_tracker().get_resource_summary()
+
+def is_shutting_down() -> bool:
+    """Check if system is shutting down"""
+    return get_resource_tracker().is_shutting_down()
 
 # Decorator for automatic resource management
 def with_resource_management(resource_type: str = "function"):
     """Decorator to add automatic resource management to functions"""
     def decorator(func):
         async def wrapper(*args, **kwargs):
+            tracker = get_resource_tracker()
             func_name = f"{func.__module__}.{func.__name__}"
 
             def cleanup_func_resource():
                 logger.debug(f"Function {func_name} completed")
 
-            _resource_tracker.register_resource(
+            tracker.register_resource(
                 func_name,
                 func,
                 cleanup_func_resource,
@@ -439,7 +559,7 @@ def with_resource_management(resource_type: str = "function"):
                 result = await func(*args, **kwargs)
                 return result
             finally:
-                _resource_tracker.unregister_resource(func_name)
+                tracker.unregister_resource(func_name)
 
         return wrapper
     return decorator

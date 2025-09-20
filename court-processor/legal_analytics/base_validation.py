@@ -183,7 +183,7 @@ class RecommendationRequest(BaseAnalyticsRequest):
 
 class CitationAnalysisRequest(BaseAnalyticsRequest):
     """Validates citation analysis requests"""
-    analysis_depth: str = Field("standard", regex="^(basic|standard|comprehensive)$")
+    analysis_depth: str = Field("standard", pattern="^(basic|standard|comprehensive)$")
     include_network: bool = Field(True)
 
 class TopicClusteringRequest(BaseBatchRequest):
@@ -191,7 +191,7 @@ class TopicClusteringRequest(BaseBatchRequest):
     key: str = Field(..., min_length=1, max_length=100, description="Clustering key")
     max_clusters: int = Field(20, ge=1, le=50)
     min_cluster_size: int = Field(3, ge=2, le=20)
-    algorithm: str = Field("community", regex="^(community|kmeans|hierarchical)$")
+    algorithm: str = Field("community", pattern="^(community|kmeans|hierarchical)$")
     min_confidence: float = Field(0.5, ge=0.0, le=1.0)
 
     @validator('key')
@@ -214,7 +214,7 @@ class TopicClusteringRequest(BaseBatchRequest):
 
 class SearchRequest(BaseSearchRequest):
     """Validates search requests"""
-    search_profile: str = Field("basic", regex="^(basic|professional|advanced|research|litigation)$")
+    search_profile: str = Field("basic", pattern="^(basic|professional|advanced|research|litigation)$")
     filters: Optional[Dict[str, Any]] = Field(None)
 
     @validator('filters')

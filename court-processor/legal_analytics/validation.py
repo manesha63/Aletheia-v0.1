@@ -1,112 +1,60 @@
 """
 Input validation models for legal analytics services
 
-Provides Pydantic models for validating and sanitizing inputs to all analytics services,
-preventing crashes and security issues from malformed or malicious inputs.
+Provides additional Pydantic models for validating and sanitizing inputs to analytics services.
+This module extends the base validation framework with utility classes and helpers.
+Main validation classes are now in base_validation.py to avoid duplication.
 """
 
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
+from typing import Optional, Dict, Any
+from pydantic import Field, validator
 import re
 
-class DocumentIDValidator(BaseModel):
+# Import base validation classes and mixins
+from .base_validation import (
+    BaseAnalyticsRequest,
+    BaseBatchRequest,
+    BaseSearchRequest,
+    ValidationMixin,
+    BaseModel,
+    # Re-export the main request classes for backward compatibility
+    RecommendationRequest,
+    CitationAnalysisRequest,
+    TopicClusteringRequest,
+    SearchRequest
+)
+
+# Re-export for backward compatibility
+__all__ = [
+    'RecommendationRequest',
+    'CitationAnalysisRequest',
+    'TopicClusteringRequest',
+    'SearchRequest',
+    'DocumentIDValidator',
+    'BatchProcessingConfig',
+    'ElasticsearchConfig',
+    'validate_document_id',
+    'validate_confidence_score',
+    'validate_positive_integer'
+]
+
+class DocumentIDValidator(BaseModel, ValidationMixin):
     """Validates document ID format and existence"""
     document_id: str = Field(..., min_length=1, max_length=256, description="Document identifier")
 
     @validator('document_id')
-    def validate_document_id_format(cls, v):
-        # Allow alphanumeric, hyphens, underscores, and dots
-        if not re.match(r'^[a-zA-Z0-9._-]+$', v):
-            raise ValueError('Document ID contains invalid characters. Only alphanumeric, dots, hyphens, and underscores allowed.')
-        return v.strip()
+    def validate_document_id(cls, v):
+        return cls.validate_document_id_format(v)
 
-class RecommendationRequest(BaseModel):
-    """Validates case recommendation requests"""
-    document_id: str = Field(..., min_length=1, max_length=256)
-    max_recommendations: int = Field(20, ge=1, le=100, description="Maximum number of recommendations to return")
-    min_score_threshold: float = Field(0.1, ge=0.0, le=1.0, description="Minimum similarity score threshold")
-    include_full_graph: bool = Field(True, description="Whether to include full graph data")
+class BatchProcessingConfig(BaseBatchRequest):
+    """Validates batch processing configuration - extends BaseBatchRequest"""
+    # Inherits batch_size, max_total_items (renamed from max_total_documents), timeout_seconds
+    pass
 
-    @validator('document_id')
-    def validate_document_id_format(cls, v):
-        if not re.match(r'^[a-zA-Z0-9._-]+$', v):
-            raise ValueError('Document ID contains invalid characters')
-        return v.strip()
-
-class CitationAnalysisRequest(BaseModel):
-    """Validates citation analysis requests"""
-    document_id: str = Field(..., min_length=1, max_length=256)
-    analysis_depth: str = Field("standard", regex="^(basic|standard|comprehensive)$")
-    include_network: bool = Field(True, description="Include citation network analysis")
-    min_citation_confidence: float = Field(0.5, ge=0.0, le=1.0)
-
-    @validator('document_id')
-    def validate_document_id_format(cls, v):
-        if not re.match(r'^[a-zA-Z0-9._-]+$', v):
-            raise ValueError('Document ID contains invalid characters')
-        return v.strip()
-
-class TopicClusteringRequest(BaseModel):
-    """Validates topic clustering requests"""
-    key: str = Field(..., min_length=1, max_length=100, description="Clustering key/identifier")
-    max_clusters: int = Field(20, ge=1, le=50, description="Maximum number of clusters to generate")
-    min_cluster_size: int = Field(3, ge=2, le=20, description="Minimum documents per cluster")
-    algorithm: str = Field("community", regex="^(community|kmeans|hierarchical)$")
-    min_topic_confidence: float = Field(0.5, ge=0.0, le=1.0)
-
-    @validator('key')
-    def validate_key_format(cls, v):
-        # Allow alphanumeric and basic punctuation for clustering keys
-        if not re.match(r'^[a-zA-Z0-9._\-\s]+$', v):
-            raise ValueError('Clustering key contains invalid characters')
-        return v.strip()
-
-class SearchRequest(BaseModel):
-    """Validates search requests"""
-    query: str = Field(..., min_length=1, max_length=1000, description="Search query")
-    max_results: int = Field(20, ge=1, le=100, description="Maximum results to return")
-    search_profile: str = Field("basic", regex="^(basic|professional|advanced|research|litigation)$")
-    filters: Optional[Dict[str, Any]] = Field(None, description="Additional search filters")
-
-    @validator('query')
-    def validate_query_content(cls, v):
-        # Basic sanitization - remove potential script tags and normalize whitespace
-        v = re.sub(r'<[^>]*>', '', v)  # Remove HTML tags
-        v = re.sub(r'\s+', ' ', v)     # Normalize whitespace
-        v = v.strip()
-
-        if not v:
-            raise ValueError('Query cannot be empty after sanitization')
-
-        return v
-
-    @validator('filters')
-    def validate_filters(cls, v):
-        if v is None:
-            return v
-
-        # Validate filter structure
-        allowed_filter_keys = {
-            'date_range', 'court_id', 'judge_name', 'document_type',
-            'jurisdiction', 'case_type', 'topic_filter'
-        }
-
-        for key in v.keys():
-            if key not in allowed_filter_keys:
-                raise ValueError(f'Invalid filter key: {key}')
-
-        return v
-
-class BatchProcessingConfig(BaseModel):
-    """Validates batch processing configuration"""
-    batch_size: int = Field(100, ge=1, le=1000, description="Number of documents per batch")
-    max_total_documents: int = Field(10000, ge=1, le=50000, description="Maximum total documents to process")
-    timeout_seconds: int = Field(300, ge=30, le=3600, description="Processing timeout in seconds")
-
-class ElasticsearchConfig(BaseModel):
+class ElasticsearchConfig(BaseModel, ValidationMixin):
     """Validates Elasticsearch configuration parameters"""
     index_name: str = Field("court-documents", min_length=1, max_length=100)
-    scroll_timeout: str = Field("5m", regex="^[0-9]+[smh]$")
+    scroll_timeout: str = Field("5m", pattern="^[0-9]+[smh]$")
     scroll_size: int = Field(1000, ge=10, le=10000)
 
     @validator('index_name')
@@ -118,23 +66,19 @@ class ElasticsearchConfig(BaseModel):
             raise ValueError('Index name cannot start with dots, underscores, or hyphens')
         return v
 
+    @validator('scroll_size')
+    def validate_scroll_size(cls, v):
+        return cls.validate_positive_integer_range(v, "scroll_size", 10, 10000)
+
+# Convenience validation functions - now delegating to ValidationMixin methods
 def validate_document_id(document_id: str) -> str:
     """Quick validation helper for document IDs"""
-    validator = DocumentIDValidator(document_id=document_id)
-    return validator.document_id
+    return ValidationMixin.validate_document_id_format(document_id)
 
 def validate_confidence_score(score: float, field_name: str = "confidence") -> float:
     """Quick validation helper for confidence scores"""
-    if not isinstance(score, (int, float)):
-        raise ValueError(f'{field_name} must be a number')
-    if not 0.0 <= score <= 1.0:
-        raise ValueError(f'{field_name} must be between 0.0 and 1.0')
-    return float(score)
+    return ValidationMixin.validate_confidence_range(score, field_name)
 
 def validate_positive_integer(value: int, field_name: str, min_val: int = 1, max_val: int = 10000) -> int:
     """Quick validation helper for positive integers with bounds"""
-    if not isinstance(value, int):
-        raise ValueError(f'{field_name} must be an integer')
-    if not min_val <= value <= max_val:
-        raise ValueError(f'{field_name} must be between {min_val} and {max_val}')
-    return value
+    return ValidationMixin.validate_positive_integer_range(value, field_name, min_val, max_val)

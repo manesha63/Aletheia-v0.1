@@ -28,12 +28,18 @@ from .base_validation import (
     validate_with_context, get_validation_context
 )
 from .adaptive_batching import (
-    OperationType, AdaptiveBatchSizer, get_optimal_batch_size,
-    process_with_adaptive_batching
+    OperationType, SimplifiedAdaptiveBatchSizer, get_batch_sizer,
+    process_with_retry_and_batching, get_circuit_breaker_status,
+    calculate_optimal_batch_size
 )
 from .resource_management import (
     ManagedAnalyticsService, analytics_service_context,
     elasticsearch_connection_manager, with_resource_management
+)
+# For monitoring and debugging
+from .observability import (
+    get_observability, track_operation, observe_function,
+    log_info, log_error, get_diagnostics
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +58,7 @@ class ModernCaseRecommendationService(ManagedAnalyticsService):
 
     def __init__(self, es_client):
         super().__init__("case_recommendations", es_client)
-        self.batch_sizer = AdaptiveBatchSizer()
+        self.batch_sizer = get_batch_sizer()
 
     async def get_related_cases(
         self,
@@ -84,7 +90,7 @@ class ModernCaseRecommendationService(ManagedAnalyticsService):
 
             # 3. DOCUMENT SCHEMA: Use standardized query
             query = ServiceQueryBuilder.case_recommendations_query(
-                batch_size=get_optimal_batch_size(OperationType.DOCUMENT_FETCH)
+                batch_size=calculate_optimal_batch_size(OperationType.DOCUMENT_FETCH)
             )
 
             # 4. ADAPTIVE BATCHING: Process documents with adaptive sizing
@@ -95,14 +101,16 @@ class ModernCaseRecommendationService(ManagedAnalyticsService):
                 ]
                 return self._build_recommendation_graph_batch(normalized_docs)
 
-            recommendations = await process_with_adaptive_batching(
+            documents = await self._fetch_documents_with_schema(query)
+            successful_results, failed_items = await process_with_retry_and_batching(
                 OperationType.GRAPH_BUILDING,
-                await self._fetch_documents_with_schema(query),
-                process_batch
+                documents,
+                process_batch,
+                isolate_failures=True
             )
 
             return self._format_recommendation_response(
-                validated_request, recommendations
+                validated_request, successful_results
             )
 
     async def _fetch_documents_with_schema(self, query: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -262,7 +270,7 @@ async def initialize_framework(es_client) -> Dict[str, Any]:
     embedding_pool = get_embedding_pool()
 
     # 3. Initialize adaptive batch sizer
-    batch_sizer = AdaptiveBatchSizer()
+    batch_sizer = get_batch_sizer()
 
     # 4. Test all components
     status = {

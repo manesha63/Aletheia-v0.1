@@ -71,20 +71,33 @@ class ProcessPoolManager:
 
             if pool_type == "embedding":
                 # Embedding models are memory-intensive
-                # Estimate ~2GB per worker for sentence transformers
-                memory_based_limit = max(1, int(available_memory_gb / 2))
-                return min(cpu_count // 2, memory_based_limit, 3)  # Cap at 3 for stability
+                # Realistic estimate: ~500MB per worker for sentence transformers (MiniLM)
+                # Larger models like BERT would need ~1GB
+                memory_based_limit = max(1, int(available_memory_gb / 0.5))
+                # Conservative scaling: use half CPUs, memory limit, or 4 max
+                return min(cpu_count // 2, memory_based_limit, 4)
 
             elif pool_type == "cpu_intensive":
                 # General CPU-intensive work
-                return min(cpu_count, 4)  # Cap at 4 for most operations
+                # Use more workers since memory requirement is lower
+                return min(cpu_count, 6)  # Increased cap for CPU-bound work
 
             else:
                 return 2  # Conservative default
 
         except Exception as e:
             logger.warning(f"Failed to determine optimal workers: {e}")
-            return 2  # Safe fallback
+            # Fallback with memory detection
+            try:
+                available_memory_gb = psutil.virtual_memory().available / (1024**3)
+                if available_memory_gb < 2:
+                    return 1  # Low memory system
+                elif available_memory_gb < 4:
+                    return 2  # Medium memory
+                else:
+                    return 3  # Higher memory available
+            except:
+                return 2  # Ultimate fallback
 
     def get_or_create_pool(
         self,
@@ -217,17 +230,39 @@ class ProcessPoolManager:
             raise
 
     def get_pool_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Get statistics for all pools"""
+        """Get statistics for all pools including memory usage"""
         stats = {}
         with self._lock:
             for name, pool in self._pools.items():
                 config = self._pool_configs.get(name, PoolConfig())
+
+                # Get memory stats
+                memory_stats = self._get_memory_usage()
+
                 stats[name] = {
                     "max_workers": config.max_workers,
                     "active": not pool._shutdown,
-                    "healthy": self._is_pool_healthy(name)
+                    "healthy": self._is_pool_healthy(name),
+                    "system_memory": memory_stats
                 }
         return stats
+
+    def _get_memory_usage(self) -> Dict[str, Any]:
+        """Get current system memory usage"""
+        try:
+            memory = psutil.virtual_memory()
+            return {
+                "total_gb": memory.total / (1024**3),
+                "available_gb": memory.available / (1024**3),
+                "percent_used": memory.percent,
+                "per_worker_estimate_mb": 500  # Updated realistic estimate
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get memory stats: {e}")
+            return {
+                "error": str(e),
+                "per_worker_estimate_mb": 500
+            }
 
 # Global instance
 _pool_manager = ProcessPoolManager()

@@ -281,48 +281,147 @@ handle_n8n_command() {
                     ;;
                     
                 sync)
-                    echo -e "${BLUE}Manually syncing workflows with workflow_json/...${NC}"
+                    echo -e "${BLUE}Smart bidirectional sync with workflow_json/...${NC}"
                     if ! check_service_running "n8n"; then
                         exit $EXIT_SERVICE_UNAVAILABLE
                     fi
 
-                    echo "This will sync the n8n database with files in workflow_json/"
-                    echo "- Workflows without files will be removed"
-                    echo "- New files will be imported as workflows"
+                    # Smart sync: Compare timestamps and sync intelligently
+                    echo "Analyzing workflow states..."
+
+                    # Get workflow counts
+                    workflow_count=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                        "SELECT COUNT(*) FROM workflow_entity;" 2>/dev/null || echo "0")
+                    file_count=$(find workflow_json -name "*.json" -type f 2>/dev/null | wc -l)
+
+                    echo "Found: $workflow_count workflows in n8n, $file_count files in workflow_json/"
                     echo ""
-                    read -p "Continue? (y/N) " -n 1 -r
-                    echo
-                    if [[ $REPLY =~ ^[Yy]$ ]]; then
-                        # Call the sync function from the startup script
-                        $DOCKER_COMPOSE exec -T n8n /bin/sh -c '
-                            # Source the sync function
-                            . /scripts/single-startup.sh source 2>/dev/null || true
 
-                            # Define required variables
-                            DB_PATH="/data/.n8n/database.sqlite"
-                            WORKFLOW_SOURCE="/workflow_json"
+                    if [ "$workflow_count" -eq "0" ] && [ "$file_count" -gt "0" ]; then
+                        echo -e "${CYAN}Scenario: Empty n8n, files exist${NC}"
+                        echo "Action: Import all files from workflow_json/ to n8n"
+                        echo ""
+                        read -p "Continue? (y/N) " -n 1 -r
+                        echo
+                        if [[ $REPLY =~ ^[Yy]$ ]]; then
+                            handle_n8n_command workflows import
+                        fi
 
-                            # Define logging functions if not available
-                            if ! command -v log_info >/dev/null 2>&1; then
-                                log_info() { echo "[sync] $1"; }
-                                log_success() { echo "[sync] ✓ $1"; }
-                                log_warning() { echo "[sync] ⚠ $1"; }
+                    elif [ "$workflow_count" -gt "0" ] && [ "$file_count" -eq "0" ]; then
+                        echo -e "${CYAN}Scenario: n8n has workflows, no files${NC}"
+                        echo "Action: Export all workflows from n8n to workflow_json/"
+                        echo ""
+                        read -p "Continue? (y/N) " -n 1 -r
+                        echo
+                        if [[ $REPLY =~ ^[Yy]$ ]]; then
+                            handle_n8n_command workflows save
+                        fi
+
+                    elif [ "$workflow_count" -gt "0" ] && [ "$file_count" -gt "0" ]; then
+                        echo -e "${CYAN}Scenario: Both n8n and files have content${NC}"
+                        echo "Analyzing timestamps for smart sync..."
+                        echo ""
+
+                        # Get n8n workflow data with timestamps
+                        n8n_data=$(docker exec aletheia_development-n8n-1 sqlite3 /data/.n8n/database.sqlite \
+                            "SELECT name, datetime(updatedAt) FROM workflow_entity ORDER BY name;" 2>/dev/null)
+
+                        # Check each workflow
+                        newer_in_n8n=0
+                        newer_in_files=0
+                        only_in_n8n=0
+                        only_in_files=0
+
+                        echo -e "${YELLOW}Timestamp Analysis:${NC}"
+                        echo "─────────────────────────────────────────────"
+
+                        # Check workflows in n8n
+                        while IFS='|' read -r workflow_name n8n_timestamp; do
+                            if [ -n "$workflow_name" ]; then
+                                # Look for corresponding file
+                                file_path="workflow_json/${workflow_name}-workflow.json"
+                                if [ -f "$file_path" ]; then
+                                    file_timestamp=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$file_path" 2>/dev/null)
+                                    if [ "$n8n_timestamp" \> "$file_timestamp" ]; then
+                                        echo "  📈 '$workflow_name': n8n newer ($n8n_timestamp > $file_timestamp)"
+                                        newer_in_n8n=$((newer_in_n8n + 1))
+                                    elif [ "$file_timestamp" \> "$n8n_timestamp" ]; then
+                                        echo "  📁 '$workflow_name': file newer ($file_timestamp > $n8n_timestamp)"
+                                        newer_in_files=$((newer_in_files + 1))
+                                    else
+                                        echo "  ⚖️  '$workflow_name': timestamps equal ($n8n_timestamp)"
+                                    fi
+                                else
+                                    echo "  🆕 '$workflow_name': only in n8n ($n8n_timestamp)"
+                                    only_in_n8n=$((only_in_n8n + 1))
+                                fi
                             fi
+                        done <<EOF
+$n8n_data
+EOF
 
-                            # Define sqlite helper if not available
-                            if ! command -v sqlite_exec_with_retry >/dev/null 2>&1; then
-                                sqlite_exec_with_retry() { sqlite3 "$DB_PATH" "$1"; }
+                        # Check files that don't have workflows
+                        for file_path in workflow_json/*.json; do
+                            if [ -f "$file_path" ]; then
+                                basename=$(basename "$file_path" .json)
+                                workflow_name=${basename%-workflow}
+                                if ! echo "$n8n_data" | grep -q "^$workflow_name|"; then
+                                    file_timestamp=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$file_path" 2>/dev/null)
+                                    echo "  📄 '$workflow_name': only in files ($file_timestamp)"
+                                    only_in_files=$((only_in_files + 1))
+                                fi
                             fi
+                        done
 
-                            # Run sync
-                            if command -v sync_workflows >/dev/null 2>&1; then
-                                sync_workflows
-                            else
-                                echo "Sync function not available, please restart n8n to trigger sync"
-                            fi
-                        '
+                        echo "─────────────────────────────────────────────"
+                        echo "Summary: $newer_in_n8n newer in n8n, $newer_in_files newer in files"
+                        echo "         $only_in_n8n only in n8n, $only_in_files only in files"
+                        echo ""
+
+                        # Suggest best action
+                        if [ $only_in_n8n -gt 0 ] || [ $newer_in_n8n -gt $newer_in_files ]; then
+                            echo -e "${GREEN}Recommendation: Export from n8n → workflow_json/${NC}"
+                            echo "Reason: n8n has newer changes or new workflows"
+                            default_action="export"
+                        elif [ $only_in_files -gt 0 ] || [ $newer_in_files -gt $newer_in_n8n ]; then
+                            echo -e "${GREEN}Recommendation: Import from workflow_json → n8n${NC}"
+                            echo "Reason: Files have newer changes or new workflows"
+                            default_action="import"
+                        else
+                            echo -e "${GREEN}Recommendation: Export from n8n → workflow_json/${NC}"
+                            echo "Reason: Preserve any n8n UI changes"
+                            default_action="export"
+                        fi
+
+                        echo ""
+                        echo "Options:"
+                        echo "  1) Export n8n workflows → workflow_json/ (replace files with n8n content)"
+                        echo "  2) Import workflow_json/ → n8n (replace n8n with file content)"
+                        echo "  3) Cancel (no changes)"
+                        echo ""
+                        read -p "Choose [1-3] (default: $([[ "$default_action" == "export" ]] && echo "1" || echo "2")): " choice
+
+                        case "${choice:-$([[ "$default_action" == "export" ]] && echo "1" || echo "2")}" in
+                            1)
+                                echo "Exporting n8n workflows to workflow_json/..."
+                                handle_n8n_command workflows save
+                                ;;
+                            2)
+                                echo "Importing workflow_json/ to n8n..."
+                                # First backup current n8n workflows
+                                echo "Creating backup of current n8n workflows..."
+                                handle_n8n_command workflows export
+                                echo "Importing workflows..."
+                                handle_n8n_command workflows import
+                                ;;
+                            *)
+                                echo "Cancelled - no changes made"
+                                ;;
+                        esac
+
                     else
-                        echo "Cancelled"
+                        echo -e "${YELLOW}No workflows found in either location${NC}"
+                        echo "Create workflows in n8n UI or add .json files to workflow_json/"
                     fi
                     ;;
 
@@ -392,7 +491,7 @@ EOF
                     echo "  deactivate  - Deactivate all (or specific) workflow(s)"
                     echo "  execute     - Execute a specific workflow"
                     echo "  status      - Show workflow status"
-                    echo "  sync        - Sync workflows with workflow_json/ directory"
+                    echo "  sync        - Smart bidirectional sync between n8n and workflow_json/"
                     echo "  save        - Save workflows back to workflow_json/ for git commit"
                     ;;
             esac

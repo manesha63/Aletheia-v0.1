@@ -276,35 +276,39 @@ class ElasticsearchSync:
             cursor = self.db_conn.cursor(cursor_factory=RealDictCursor)
 
             # Build query - only sync documents with actual content, excluding low-value docs
-            query = """
+            base_query = """
                 SELECT id, case_number, case_name, document_type, file_path,
                        content, metadata, processed, created_at, updated_at
                 FROM court_documents
                 WHERE content IS NOT NULL AND content != ''
-                AND content NOT ILIKE '%paid tier access%'
+                AND content NOT ILIKE %(paid_filter)s
             """
 
-            params = []
+            params = {'paid_filter': '%paid tier access%'}
 
             # Add incremental filter if needed
             if incremental:
                 # TODO: Implement incremental sync based on last sync timestamp
-                query += " AND updated_at > %s"
-                # For now, we'll implement this in a future version
+                # For now, skip incremental filtering until properly implemented
+                logger.warning("Incremental sync requested but not yet implemented - doing full sync")
                 pass
 
-            # Add ordering and limits
-            query += " ORDER BY id"
+            # Build final query with ordering and limits
+            query_parts = [base_query, " ORDER BY id"]
 
             if limit:
-                query += " LIMIT %s"
-                params.append(limit)
+                query_parts.append(" LIMIT %(limit)s")
+                params['limit'] = limit
 
             if offset > 0:
-                query += " OFFSET %s"
-                params.append(offset)
+                query_parts.append(" OFFSET %(offset)s")
+                params['offset'] = offset
+
+            query = "".join(query_parts)
 
             logger.info(f"Fetching documents from PostgreSQL (limit: {limit}, offset: {offset})")
+            logger.debug(f"Query: {query}")
+            logger.debug(f"Params: {params}")
             cursor.execute(query, params)
 
             documents = cursor.fetchall()
@@ -358,6 +362,12 @@ class ElasticsearchSync:
                 except:
                     metadata = {}
 
+            # Clean empty date fields from metadata to prevent ES parsing errors
+            date_fields = ['date_filed', 'filing_date', 'decision_date', 'document_date']
+            for field in date_fields:
+                if field in metadata and (metadata[field] == '' or metadata[field] is None):
+                    del metadata[field]
+
             # Prepare Elasticsearch document
             es_doc = {
                 'id': doc['id'],
@@ -374,9 +384,9 @@ class ElasticsearchSync:
                 # Enhanced fields from metadata
                 'judge_name': metadata.get('judge_name'),
                 'court_id': metadata.get('court_id'),
-                'filing_date': metadata.get('filing_date'),
-                'decision_date': metadata.get('decision_date'),
-                'document_date': metadata.get('document_date'),
+                'filing_date': metadata.get('filing_date') if metadata.get('filing_date') and metadata.get('filing_date').strip() else None,
+                'decision_date': metadata.get('decision_date') if metadata.get('decision_date') and metadata.get('decision_date').strip() else None,
+                'document_date': metadata.get('document_date') if metadata.get('document_date') and metadata.get('document_date').strip() else None,
                 # Structured legal metadata
                 'legal_citations': metadata.get('legal_citations'),
                 'case_dispositions': metadata.get('case_dispositions'),
@@ -426,20 +436,38 @@ class ElasticsearchSync:
             # Perform bulk indexing
             logger.info(f"Bulk indexing {len(actions)} documents to Elasticsearch")
 
-            success_count, failed_items = helpers.bulk(
-                self.es_client,
-                actions,
-                index=self.es_index,
-                chunk_size=100,  # Process in chunks
-                request_timeout=60
-            )
+            try:
+                success_count, failed_items = helpers.bulk(
+                    self.es_client,
+                    actions,
+                    index=self.es_index,
+                    chunk_size=100,  # Process in chunks
+                    request_timeout=60
+                )
+            except helpers.BulkIndexError as e:
+                logger.error(f"❌ Bulk indexing failed: {len(e.errors)} document(s) failed to index.")
+
+                # Log first 3 errors with details for debugging
+                for i, error in enumerate(e.errors[:3]):
+                    if isinstance(error, dict) and 'index' in error:
+                        error_detail = error['index'].get('error', {})
+                        error_type = error_detail.get('type', 'unknown')
+                        error_reason = error_detail.get('reason', 'no reason provided')
+                        logger.error(f"Error {i+1}: {error_type} - {error_reason}")
+                    else:
+                        logger.error(f"Error {i+1}: {error}")
+
+                # Set failed count and continue with empty success
+                success_count = 0
+                failed_items = e.errors
 
             self.stats['synced_documents'] += success_count
 
             if failed_items:
                 self.stats['failed_documents'] += len(failed_items)
                 logger.error(f"❌ {len(failed_items)} documents failed to index")
-                for item in failed_items:
+                for item in failed_items[:3]:  # Show first 3 errors for debugging
+                    logger.error(f"Indexing error details: {item}")
                     self.stats['errors'].append(f"Failed to index: {item}")
 
             logger.info(f"✅ Successfully indexed {success_count} documents")

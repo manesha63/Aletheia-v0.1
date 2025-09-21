@@ -141,6 +141,116 @@ class CourtAPIClient {
     }
     return response.json();
   }
+
+  async searchElasticsearch(params: {
+    query: string;
+    judge?: string;
+    court?: string;
+    document_type?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<SearchResponse & { query: string }> {
+    const searchParams = new URLSearchParams();
+
+    // Required query parameter
+    searchParams.append('query', params.query);
+
+    // Optional filters
+    if (params.judge) searchParams.append('judge', params.judge);
+    if (params.court) searchParams.append('court', params.court);
+    if (params.document_type) searchParams.append('document_type', params.document_type);
+    searchParams.append('limit', (params.limit || 10).toString());
+    searchParams.append('offset', (params.offset || 0).toString());
+
+    const response = await fetch(`${this.getUrl()}/search/es?${searchParams}`);
+    if (!response.ok) {
+      throw new Error(`Elasticsearch search failed: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async searchAI(params: {
+    query: string;
+    profile?: 'basic' | 'professional' | 'advanced' | 'research' | 'litigation';
+    legal_topics?: string[];
+    courts?: string[];
+    judges?: string[];
+    dispositions?: string[];
+    date_start?: string;
+    date_end?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<SearchResponse & {
+    query: string;
+    search_profile: string;
+    ai_features_active: number;
+    legal_filters_applied: number;
+    aggregations?: any;
+    features_used: string[];
+  }> {
+    const searchParams = new URLSearchParams();
+
+    // Required query parameter
+    searchParams.append('query', params.query);
+
+    // Search profile
+    if (params.profile) searchParams.append('profile', params.profile);
+
+    // Legal filtering
+    if (params.legal_topics?.length) {
+      searchParams.append('legal_topics', params.legal_topics.join(','));
+    }
+    if (params.courts?.length) {
+      searchParams.append('courts', params.courts.join(','));
+    }
+    if (params.judges?.length) {
+      searchParams.append('judges', params.judges.join(','));
+    }
+    if (params.dispositions?.length) {
+      searchParams.append('dispositions', params.dispositions.join(','));
+    }
+
+    // Date range
+    if (params.date_start) searchParams.append('date_start', params.date_start);
+    if (params.date_end) searchParams.append('date_end', params.date_end);
+
+    // Pagination
+    searchParams.append('limit', (params.limit || 10).toString());
+    searchParams.append('offset', (params.offset || 0).toString());
+
+    const response = await fetch(`${this.getUrl()}/search/ai?${searchParams}`);
+    if (!response.ok) {
+      throw new Error(`AI search failed: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getSearchFeatures(): Promise<{
+    available_features: Array<{
+      name: string;
+      description: string;
+    }>;
+    search_profiles: Record<string, {
+      description: string;
+      features: string[];
+      use_cases: string[];
+      performance: string;
+    }>;
+    dataset_info: {
+      total_documents: number;
+      has_embeddings: boolean;
+      has_legal_topics: boolean;
+      has_case_dispositions: boolean;
+      courts_available: number;
+      judges_available: number;
+    };
+  }> {
+    const response = await fetch(`${this.getUrl()}/search/features`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch search features: ${response.statusText}`);
+    }
+    return response.json();
+  }
 }
 
 export const courtAPI = new CourtAPIClient();

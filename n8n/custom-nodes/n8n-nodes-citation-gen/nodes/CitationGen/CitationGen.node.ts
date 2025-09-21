@@ -12,9 +12,14 @@ import {
 
 import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
-// Constants (commented out unused imports)
-// import { Client as ElasticsearchClient } from '@elastic/elasticsearch';
-// const CHARS_PER_TOKEN = 4;
+// Constants
+const CHARS_PER_TOKEN = 4;
+
+// Token estimation helper
+function estimateTokenCount(text: string): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
 
 // Global resilience instances
 let globalCircuitBreaker: CircuitBreaker | null = null;
@@ -688,8 +693,8 @@ async function processOpinion(
 
   console.log(`[CG] Processing opinion document: ${doc.id}`);
 
-  // Phase 1: Generate initial summary batches with AI tagging (placeholder)
-  const firstLevelSummaries = await generateInitialSummaries(doc, pool);
+  // Phase 1: Generate initial summary batches with AI tagging
+  const firstLevelSummaries = await generateInitialSummaries(executeFunctions, doc, itemIndex, pool);
 
   // Phase 2: Elasticsearch grouping (if enabled)
   let groupedAnalysis = {};
@@ -718,30 +723,306 @@ async function processOpinion(
   };
 }
 
-// STUB METHODS - PLACEHOLDER IMPLEMENTATIONS
+// AI-POWERED INITIAL SUMMARIZATION
 async function generateInitialSummaries(
+  executeFunctions: IExecuteFunctions,
   doc: DocumentInput,
+  itemIndex: number,
   pool: Pool
 ): Promise<TaggedSummary[]> {
-  console.log(`[CG] Starting initial summarization for document ${doc.id}`);
+  console.log(`[CG] Starting AI-powered summarization for document ${doc.id}`);
 
-  // For now, return a simple placeholder
-  const summary: TaggedSummary = {
-    id: uuidv4(),
-    document_id: doc.id,
-    batch_index: 0,
-    summary_text: 'This is a placeholder summary. AI integration will be completed next.',
-    ai_tags: [{
-      type: 'status',
-      value: 'processing',
-      source_reference: 'placeholder',
-      raw_tag: '<**status:processing**>'
-    }],
-    token_count: 100,
-    source_content: doc.content.substring(0, 500) + '...'
+  // Get configuration parameters
+  const summaryPrompt = executeFunctions.getNodeParameter('opinionSummaryPrompt', itemIndex) as string;
+  const taggingPrompt = executeFunctions.getNodeParameter('taggingPrompt', itemIndex) as string;
+  const batchSize = executeFunctions.getNodeParameter('batchSize', itemIndex) as number;
+
+  // Get resilience options
+  const resilienceOptions = executeFunctions.getNodeParameter('resilienceOptions', itemIndex) as any;
+  const rateLimit = resilienceOptions?.rateLimit || 20;
+  const circuitBreakerEnabled = resilienceOptions?.circuitBreakerEnabled !== false;
+
+  // Initialize resilience patterns
+  await initializeResilience();
+
+  // Split document into batches
+  const batches = chunkDocumentIntoBatches(doc.content, batchSize);
+  const summaries: TaggedSummary[] = [];
+
+  console.log(`[CG] Processing ${batches.length} batches for document ${doc.id}`);
+
+  // Process each batch
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    console.log(`[CG] Processing batch ${i + 1}/${batches.length} (${batch.length} chars)`);
+
+    try {
+      // Create combined prompt for summary and tagging
+      const combinedPrompt = `${summaryPrompt}\n\nAdditional tagging instructions: ${taggingPrompt}`;
+
+      // Generate summary with AI
+      const summaryText = await generateAISummary(
+        executeFunctions,
+        batch,
+        combinedPrompt,
+        rateLimit,
+        circuitBreakerEnabled
+      );
+
+      // Extract AI tags from the summary
+      const aiTags = extractAITags(summaryText);
+
+      // Store in database
+      const client = await pool.connect();
+      try {
+        const result = await client.query(
+          `INSERT INTO legal_summaries
+           (document_id, batch_index, summary_text, ai_tags, token_count, source_content)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [
+            doc.id,
+            i,
+            summaryText,
+            JSON.stringify(aiTags),
+            estimateTokenCount(summaryText),
+            batch
+          ]
+        );
+
+        const summaryId = result.rows[0].id;
+
+        summaries.push({
+          id: summaryId,
+          document_id: doc.id,
+          batch_index: i,
+          summary_text: summaryText,
+          ai_tags: aiTags,
+          token_count: estimateTokenCount(summaryText),
+          source_content: batch
+        });
+
+      } finally {
+        client.release();
+      }
+
+    } catch (error) {
+      console.error(`[CG] Failed to process batch ${i + 1}: ${error.message}`);
+
+      // Create fallback summary
+      const fallbackSummary = generateFallbackSummary(batch, i);
+      summaries.push(fallbackSummary);
+    }
+  }
+
+  console.log(`[CG] Completed summarization: ${summaries.length} summaries generated`);
+  return summaries;
+}
+
+// Helper function to chunk document into manageable batches
+function chunkDocumentIntoBatches(content: string, maxTokens: number): string[] {
+  const maxChars = maxTokens * CHARS_PER_TOKEN;
+  const chunks: string[] = [];
+
+  // Split on paragraph boundaries first
+  const paragraphs = content.split(/\n\s*\n/);
+  let currentChunk = '';
+
+  for (const paragraph of paragraphs) {
+    if (currentChunk.length + paragraph.length + 2 <= maxChars) {
+      currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
+    } else {
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '';
+      }
+
+      // If paragraph is too long, split by sentences
+      if (paragraph.length > maxChars) {
+        const sentences = paragraph.split(/(?<=[.!?])\s+/);
+        for (const sentence of sentences) {
+          if (currentChunk.length + sentence.length + 1 <= maxChars) {
+            currentChunk += (currentChunk ? ' ' : '') + sentence;
+          } else {
+            if (currentChunk) {
+              chunks.push(currentChunk.trim());
+              currentChunk = sentence;
+            } else {
+              // Sentence too long, force split
+              chunks.push(sentence.substring(0, maxChars));
+              currentChunk = sentence.substring(maxChars);
+            }
+          }
+        }
+      } else {
+        currentChunk = paragraph;
+      }
+    }
+  }
+
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [content.substring(0, maxChars)];
+}
+
+// AI summary generation with resilience
+async function generateAISummary(
+  executeFunctions: IExecuteFunctions,
+  content: string,
+  prompt: string,
+  rateLimit: number,
+  circuitBreakerEnabled: boolean
+): Promise<string> {
+  // Rate limiting
+  if (globalRateLimiter) {
+    await globalRateLimiter.execute(async () => Promise.resolve());
+  }
+
+  // Circuit breaker protection
+  const operation = async () => {
+    // Get the AI language model connection
+    const languageModel = await executeFunctions.getInputConnectionData(
+      NodeConnectionType.AiLanguageModel,
+      0
+    );
+
+    if (!languageModel || typeof (languageModel as any).invoke !== 'function') {
+      throw new NodeOperationError(
+        executeFunctions.getNode(),
+        'No AI language model connected. Please connect an AI model to the Language Model input.'
+      );
+    }
+
+    // Build user content
+    const userContent = `Legal document content to summarize:\n\n${content}`;
+
+    let response;
+    try {
+      // Try custom node format first (BitNet style)
+      response = await Promise.race([
+        (languageModel as any).invoke({
+          messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: userContent }
+          ],
+          options: {
+            temperature: 0.3,
+            maxTokensToSample: 200,
+          }
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('AI request timeout after 60 seconds')), 60000)
+        )
+      ]);
+    } catch (invokeError: any) {
+      // Fallback to standard n8n format
+      if (invokeError.message?.includes('toChatMessages') || invokeError.message?.includes('messages')) {
+        console.log('[CG] Using standard n8n AI format');
+        const combinedPrompt = `${prompt}\n\nHuman: ${userContent}\n\nAI:`;
+
+        response = await Promise.race([
+          (languageModel as any).invoke(combinedPrompt, {
+            temperature: 0.3,
+            estimatedTokens: estimateTokenCount(userContent) + 100,
+            options: {
+              temperature: 0.3,
+              max_tokens: 200,
+            }
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('AI request timeout after 60 seconds')), 60000)
+          )
+        ]);
+      } else {
+        throw invokeError;
+      }
+    }
+
+    // Parse response based on format
+    let summaryText = '';
+    if (response?.text) {
+      summaryText = response.text;
+    } else if (response?.content) {
+      summaryText = response.content;
+    } else if (response?.response?.generations?.[0]?.[0]?.text) {
+      summaryText = response.response.generations[0][0].text;
+    } else if (typeof response === 'string') {
+      summaryText = response;
+    } else {
+      throw new Error('Unexpected AI response format');
+    }
+
+    return summaryText.trim();
   };
 
-  return [summary];
+  // Execute with circuit breaker if enabled
+  if (circuitBreakerEnabled && globalCircuitBreaker) {
+    return await globalCircuitBreaker.execute(operation);
+  } else {
+    return await operation();
+  }
+}
+
+// Extract AI tags from summary text
+function extractAITags(summaryText: string): AITag[] {
+  const tags: AITag[] = [];
+
+  // Regex to find tags in format <**type:value**>
+  const tagRegex = /<\*\*([^:]+):([^*]+)\*\*>/g;
+  let match;
+
+  while ((match = tagRegex.exec(summaryText)) !== null) {
+    const [fullMatch, type, value] = match;
+
+    // Validate tag type
+    const validTypes: Array<AITag['type']> = ['status', 'outcome', 'legal_standard', 'parties', 'custom'];
+    const tagType = validTypes.includes(type as AITag['type']) ? type as AITag['type'] : 'custom';
+
+    tags.push({
+      type: tagType,
+      value: value.trim(),
+      confidence: 0.8, // Default confidence for extracted tags
+      source_reference: `char_${match.index}`,
+      raw_tag: fullMatch
+    });
+  }
+
+  // If no tags found, create a default processing tag
+  if (tags.length === 0) {
+    tags.push({
+      type: 'status',
+      value: 'analyzed',
+      confidence: 0.5,
+      source_reference: 'auto_generated',
+      raw_tag: '<**status:analyzed**>'
+    });
+  }
+
+  return tags;
+}
+
+// Fallback summary generation
+function generateFallbackSummary(content: string, batchIndex: number): TaggedSummary {
+  // Simple extractive summarization - take first few sentences
+  const sentences = content.split(/(?<=[.!?])\s+/);
+  const summaryText = sentences.slice(0, 3).join(' ');
+
+  return {
+    id: uuidv4(),
+    document_id: 'fallback',
+    batch_index: batchIndex,
+    summary_text: `[FALLBACK SUMMARY] ${summaryText}`,
+    ai_tags: [{
+      type: 'status',
+      value: 'fallback_generated',
+      confidence: 0.3,
+      source_reference: 'fallback_system',
+      raw_tag: '<**status:fallback_generated**>'
+    }],
+    token_count: estimateTokenCount(summaryText),
+    source_content: content
+  };
 }
 
 async function performElasticsearchGrouping(

@@ -110,7 +110,7 @@ class RelatedCaseService:
             request = RecommendationRequest(
                 document_id=document_id,
                 max_recommendations=max_recommendations,
-                min_score_threshold=min_score_threshold,
+                min_confidence=min_score_threshold,  # Use min_confidence parameter name
                 include_full_graph=include_full_graph
             )
         except ValidationError as e:
@@ -120,7 +120,7 @@ class RelatedCaseService:
         # Use validated values
         document_id = request.document_id
         max_recommendations = request.max_recommendations
-        min_score_threshold = request.min_score_threshold
+        min_score_threshold = request.min_confidence  # Map back to local variable name
         include_full_graph = request.include_full_graph
 
         await self.build_recommendation_graphs()
@@ -424,16 +424,11 @@ class RelatedCaseService:
         # Search for documents with overlapping topics
         query = {
             "query": {
-                "nested": {
-                    "path": "legal_topics",
-                    "query": {
-                        "bool": {
-                            "should": [
-                                {"term": {"legal_topics.topic.keyword": topic}}
-                                for topic in source_topics
-                            ]
-                        }
-                    }
+                "bool": {
+                    "should": [
+                        {"term": {"legal_topics.topic.keyword": topic}}
+                        for topic in source_topics
+                    ]
                 }
             },
             "size": limit,

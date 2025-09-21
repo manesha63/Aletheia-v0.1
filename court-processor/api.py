@@ -19,6 +19,8 @@ import json
 import re
 import os
 from elasticsearch import Elasticsearch
+from elasticsearch import AsyncElasticsearch
+from elasticsearch import AsyncElasticsearch
 from search_features import AISearchEngine, SearchProfiles, SearchFeature, SearchConfig
 from legal_analytics import RelatedCaseService, TopicClusteringService, CitationAnalyticsService
 import logging
@@ -80,6 +82,20 @@ def get_es_client():
         return Elasticsearch([es_url])
     except Exception as e:
         logger.error(f"Elasticsearch connection failed: {e}")
+        raise
+
+def get_async_es_client():
+    """Create AsyncElasticsearch client for analytics services with enhanced resilience"""
+    try:
+        es_url = f"http://{ES_CONFIG['host']}:{ES_CONFIG['port']}"
+        return AsyncElasticsearch(
+            hosts=[es_url],
+            request_timeout=60,  # Extended timeout for complex analytics
+            max_retries=3,       # More retries for resilience
+            retry_on_timeout=True
+        )
+    except Exception as e:
+        logger.error(f"AsyncElasticsearch connection failed: {e}")
         raise
 
 def extract_plain_text(html_content: str) -> str:
@@ -243,6 +259,9 @@ async def health():
             "GET /text/{id}": "Get plain text directly",
             "GET /documents/{id}": "Get full document info with XML metadata",
             "GET /search": "Simple search with direct text",
+            "GET /search/es": "Elasticsearch-powered full-text search",
+            "GET /search/ai": "AI-powered legal search with profiles",
+            "GET /search/features": "Available AI search features and profiles",
             "GET /list": "List recent documents",
             "GET /bulk/judge/{name}": "Bulk retrieval by judge with XML metadata",
             "GET /sample": "Sample document for testing"
@@ -250,7 +269,10 @@ async def health():
         "features": {
             "xml_metadata": "Rich legal metadata (citations, motions, rules)",
             "bulk_export": "Large-scale data retrieval by judge",
-            "full_text": "Complete document content extraction"
+            "full_text": "Complete document content extraction",
+            "elasticsearch_search": "Fast full-text search with relevance scoring",
+            "ai_powered_search": "Semantic search with legal intelligence",
+            "multiple_profiles": "Configurable search profiles for different use cases"
         }
     }
 
@@ -1265,7 +1287,7 @@ async def get_related_cases(
     can use to understand case relationships and provide contextual recommendations.
     """
     try:
-        es = get_es_client()
+        es = get_async_es_client()
         related_service = RelatedCaseService(es)
 
         result = await related_service.get_related_cases(
@@ -1278,9 +1300,16 @@ async def get_related_cases(
         return result
 
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.warning(f"Invalid input for related cases: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
+    except ConnectionError as e:
+        logger.error(f"Elasticsearch connection failed: {e}")
+        raise HTTPException(status_code=503, detail="Search service temporarily unavailable")
+    except TimeoutError as e:
+        logger.error(f"Related cases analysis timed out: {e}")
+        raise HTTPException(status_code=504, detail="Analysis request timed out - try with fewer recommendations")
     except Exception as e:
-        logger.error(f"Related cases analysis failed: {e}")
+        logger.error(f"Related cases analysis failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Related cases analysis failed")
 
 @app.get("/analytics/topic-clusters")
@@ -1307,7 +1336,7 @@ async def get_topic_clusters(
     can use to understand document organization and suggest topical research directions.
     """
     try:
-        es = get_es_client()
+        es = get_async_es_client()
         clustering_service = TopicClusteringService(es)
 
         result = await clustering_service.build_topic_clusters(
@@ -1319,8 +1348,17 @@ async def get_topic_clusters(
 
         return result
 
+    except ConnectionError as e:
+        logger.error(f"Elasticsearch connection failed: {e}")
+        raise HTTPException(status_code=503, detail="Search service temporarily unavailable")
+    except TimeoutError as e:
+        logger.error(f"Topic clustering timed out: {e}")
+        raise HTTPException(status_code=504, detail="Clustering request timed out - try with fewer clusters")
+    except ValueError as e:
+        logger.warning(f"Invalid clustering parameters: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid clustering parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"Topic clustering failed: {e}")
+        logger.error(f"Topic clustering failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Topic clustering analysis failed")
 
 @app.get("/analytics/topic-clusters/{document_id}")
@@ -1335,7 +1373,7 @@ async def get_document_topic_clusters(document_id: str):
     - Related documents in same clusters
     """
     try:
-        es = get_es_client()
+        es = get_async_es_client()
         clustering_service = TopicClusteringService(es)
 
         result = await clustering_service.get_document_topic_clusters(document_id)
@@ -1347,8 +1385,14 @@ async def get_document_topic_clusters(document_id: str):
 
     except HTTPException:
         raise
+    except ConnectionError as e:
+        logger.error(f"Elasticsearch connection failed: {e}")
+        raise HTTPException(status_code=503, detail="Search service temporarily unavailable")
+    except ValueError as e:
+        logger.warning(f"Invalid document ID: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid document ID: {str(e)}")
     except Exception as e:
-        logger.error(f"Document topic analysis failed: {e}")
+        logger.error(f"Document topic analysis failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Document topic analysis failed")
 
 @app.get("/analytics/citation-network")
@@ -1372,15 +1416,21 @@ async def get_citation_network(
     can use to assess case importance and identify authoritative sources.
     """
     try:
-        es = get_es_client()
+        es = get_async_es_client()
         citation_service = CitationAnalyticsService(es)
 
         result = await citation_service.build_citation_network(force_rebuild=force_rebuild)
 
         return result
 
+    except ConnectionError as e:
+        logger.error(f"Elasticsearch connection failed: {e}")
+        raise HTTPException(status_code=503, detail="Search service temporarily unavailable")
+    except TimeoutError as e:
+        logger.error(f"Citation network analysis timed out: {e}")
+        raise HTTPException(status_code=504, detail="Citation analysis request timed out")
     except Exception as e:
-        logger.error(f"Citation network analysis failed: {e}")
+        logger.error(f"Citation network analysis failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Citation network analysis failed")
 
 @app.get("/analytics/citation-network/{document_id}")
@@ -1396,7 +1446,7 @@ async def get_document_citation_analysis(document_id: str):
     - Network position metrics
     """
     try:
-        es = get_es_client()
+        es = get_async_es_client()
         citation_service = CitationAnalyticsService(es)
 
         result = await citation_service.get_document_citation_analysis(document_id)
@@ -1408,8 +1458,14 @@ async def get_document_citation_analysis(document_id: str):
 
     except HTTPException:
         raise
+    except ConnectionError as e:
+        logger.error(f"Elasticsearch connection failed: {e}")
+        raise HTTPException(status_code=503, detail="Search service temporarily unavailable")
+    except ValueError as e:
+        logger.warning(f"Invalid document ID: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid document ID: {str(e)}")
     except Exception as e:
-        logger.error(f"Document citation analysis failed: {e}")
+        logger.error(f"Document citation analysis failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Document citation analysis failed")
 
 @app.get("/analytics/statistics")
@@ -1424,7 +1480,7 @@ async def get_analytics_statistics():
     - Service health indicators
     """
     try:
-        es = get_es_client()
+        es = get_async_es_client()
 
         # Initialize services
         related_service = RelatedCaseService(es)
@@ -1441,9 +1497,29 @@ async def get_analytics_statistics():
 
         return stats
 
+    except ConnectionError as e:
+        logger.error(f"Elasticsearch connection failed: {e}")
+        # Return partial statistics in case of connection issues
+        return {
+            "error": "Search service temporarily unavailable",
+            "partial_stats": {
+                "timestamp": datetime.now().isoformat(),
+                "status": "degraded"
+            }
+        }
+    except TimeoutError as e:
+        logger.error(f"Analytics statistics timed out: {e}")
+        raise HTTPException(status_code=504, detail="Statistics request timed out")
     except Exception as e:
-        logger.error(f"Analytics statistics failed: {e}")
-        raise HTTPException(status_code=500, detail="Analytics statistics failed")
+        logger.error(f"Analytics statistics failed: {e}", exc_info=True)
+        # Return basic fallback statistics
+        return {
+            "error": "Analytics statistics unavailable",
+            "fallback_stats": {
+                "timestamp": datetime.now().isoformat(),
+                "status": "error"
+            }
+        }
 
 # =============================================================================
 

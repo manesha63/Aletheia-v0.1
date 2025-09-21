@@ -171,13 +171,8 @@ class TopicClusteringService:
         """Process documents in memory-efficient batches"""
         query = {
             "query": {
-                "nested": {
-                    "path": "legal_topics",
-                    "query": {
-                        "range": {
-                            "legal_topics.confidence": {"gte": 0.3}  # Minimum confidence
-                        }
-                    }
+                "range": {
+                    "legal_topics.confidence": {"gte": 0.3}  # Minimum confidence
                 }
             },
             "size": batch_size,

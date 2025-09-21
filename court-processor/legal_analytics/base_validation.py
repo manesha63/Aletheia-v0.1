@@ -188,29 +188,22 @@ class CitationAnalysisRequest(BaseAnalyticsRequest):
 
 class TopicClusteringRequest(BaseBatchRequest):
     """Validates topic clustering requests"""
-    key: str = Field(..., min_length=1, max_length=100, description="Clustering key")
-    max_clusters: int = Field(20, ge=1, le=50)
-    min_cluster_size: int = Field(3, ge=2, le=20)
-    algorithm: str = Field("community", pattern="^(community|kmeans|hierarchical)$")
-    min_confidence: float = Field(0.5, ge=0.0, le=1.0)
+    min_cluster_size: int = Field(5, ge=2, le=50, description="Minimum documents per cluster")
+    max_clusters: int = Field(50, ge=1, le=100, description="Maximum number of clusters")
+    similarity_threshold: float = Field(0.3, ge=0.0, le=1.0, description="Topic similarity threshold")
+    use_semantic_clustering: bool = Field(True, description="Use semantic embeddings for clustering")
 
-    @validator('key')
-    def validate_key_format(cls, v):
-        if not re.match(r'^[a-zA-Z0-9._\-\s]+$', v):
-            raise ValueError('Clustering key contains invalid characters')
-        return v.strip()
-
-    @validator('max_clusters')
-    def validate_max_clusters(cls, v):
-        return cls.validate_positive_integer_range(v, "max_clusters", 1, 50)
+    @validator('similarity_threshold')
+    def validate_similarity_threshold(cls, v):
+        return cls.validate_confidence_range(v, "similarity_threshold")
 
     @validator('min_cluster_size')
     def validate_min_cluster_size(cls, v):
-        return cls.validate_positive_integer_range(v, "min_cluster_size", 2, 20)
+        return cls.validate_positive_integer_range(v, "min_cluster_size", 2, 50)
 
-    @validator('min_confidence')
-    def validate_min_confidence(cls, v):
-        return cls.validate_confidence_range(v, "min_confidence")
+    @validator('max_clusters')
+    def validate_max_clusters(cls, v):
+        return cls.validate_positive_integer_range(v, "max_clusters", 1, 100)
 
 class SearchRequest(BaseSearchRequest):
     """Validates search requests"""

@@ -139,6 +139,86 @@ ensure_services_ready() {
     fi
 }
 
+# Ensure n8n custom nodes are built and synced to container
+ensure_n8n_nodes_ready() {
+    if [ -d "n8n/custom-nodes" ]; then
+        local needs_build=false
+        local built_count=0
+        local total_count=0
+        
+        # Count nodes and check if any need building
+        for node_dir in n8n/custom-nodes/n8n-nodes-*; do
+            if [ -d "$node_dir" ]; then
+                total_count=$((total_count + 1))
+                if [ -d "$node_dir/dist" ]; then
+                    built_count=$((built_count + 1))
+                else
+                    needs_build=true
+                fi
+            fi
+        done
+        
+        # Generate missing package-lock.json files first
+        for node_dir in n8n/custom-nodes/n8n-nodes-*; do
+            if [ -d "$node_dir" ] && [ ! -f "$node_dir/package-lock.json" ]; then
+                echo -e "${CYAN}Generating package-lock.json for $(basename "$node_dir")...${NC}"
+                cd "$node_dir" && npm install &>/dev/null
+                cd - &>/dev/null
+            fi
+        done
+        
+        # Create missing credentials directories
+        for node_dir in n8n/custom-nodes/n8n-nodes-*; do
+            if [ -d "$node_dir" ] && [ ! -d "$node_dir/credentials" ]; then
+                mkdir -p "$node_dir/credentials"
+            fi
+        done
+        
+        # Build nodes if needed
+        if [ "$needs_build" = true ]; then
+            echo -e "${YELLOW}Building n8n custom nodes ($built_count/$total_count built)...${NC}"
+            # Use a more targeted approach to avoid the build command stopping at first node
+            for node_dir in n8n/custom-nodes/n8n-nodes-*; do
+                if [ -d "$node_dir" ] && [ ! -d "$node_dir/dist" ]; then
+                    node_name=$(basename "$node_dir")
+                    echo -e "${CYAN}Building $node_name...${NC}"
+                    cd "$node_dir"
+                    if npm ci &>/dev/null || npm install &>/dev/null; then
+                        if npm run build &>/dev/null; then
+                            echo -e "${GREEN}✓ $node_name built successfully${NC}"
+                        else
+                            echo -e "${YELLOW}⚠ Failed to build $node_name${NC}"
+                        fi
+                    else
+                        echo -e "${YELLOW}⚠ Failed to install dependencies for $node_name${NC}"
+                    fi
+                    cd - &>/dev/null
+                fi
+            done
+        fi
+        
+        # Wait for n8n to be ready and sync built nodes to container
+        if check_service_running "n8n" 2>/dev/null; then
+            echo -e "${CYAN}Syncing custom nodes to n8n container...${NC}"
+            # Wait a bit for n8n to fully start
+            sleep 3
+            
+            for node_dir in n8n/custom-nodes/n8n-nodes-*; do
+                if [ -d "$node_dir/dist" ]; then
+                    node_name=$(basename "$node_dir")
+                    if docker cp "$node_dir/dist" "aletheia_development-n8n-1:/data/.n8n/custom/$node_name/" &>/dev/null; then
+                        echo -e "${GREEN}✓ Synced $node_name${NC}"
+                    fi
+                fi
+            done
+            
+            echo -e "${YELLOW}Restarting n8n to load custom nodes...${NC}"
+            $DOCKER_COMPOSE restart n8n &>/dev/null
+            echo -e "${GREEN}✓ n8n restarted with custom nodes${NC}"
+        fi
+    fi
+}
+
 # Handle service commands
 handle_service_command() {
     local cmd="$1"
@@ -368,6 +448,11 @@ service_up() {
             echo -e "${YELLOW}⚠ Database not ready${NC}"
             echo "  Database initialization skipped - run './dev up' again when ready"
         fi
+    fi
+    
+    # Ensure n8n custom nodes are ready after services are up
+    if [ -z "$service" ] || [ "$service" = "n8n" ]; then
+        ensure_n8n_nodes_ready
     fi
     
     # Initialize n8n after services are up

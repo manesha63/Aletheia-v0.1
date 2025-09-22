@@ -32,8 +32,9 @@ COPY ./n8n/custom-nodes/n8n-nodes-yake /usr/local/lib/node_modules/n8n-nodes-yak
 COPY ./n8n/custom-nodes/n8n-nodes-citation-gen /usr/local/lib/node_modules/n8n-nodes-citation-gen
 # BitNet node archived - removed from build due to dependency issues
 
-# Remove preinstall script from deepseek that requires pnpm
-RUN sed -i '/"preinstall":/d' /usr/local/lib/node_modules/n8n-nodes-deepseek/package.json
+# Remove preinstall script from deepseek and ollama-advanced that requires pnpm
+RUN sed -i '/"preinstall":/d' /usr/local/lib/node_modules/n8n-nodes-deepseek/package.json && \
+    sed -i '/"preinstall":/d' /usr/local/lib/node_modules/n8n-nodes-ollama-advanced/package.json
 
 # Install dependencies and build custom nodes with error tolerance
 RUN for node_dir in /usr/local/lib/node_modules/n8n-nodes-*; do \

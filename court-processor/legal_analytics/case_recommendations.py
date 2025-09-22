@@ -348,17 +348,49 @@ class RelatedCaseService:
                         self.topic_graph.add_edge(topic1, topic2, weight=weight)
 
     def _compute_authority_scores(self) -> None:
-        """Compute citation authority scores using PageRank"""
+        """Compute citation authority scores using PageRank with improved connectivity"""
         try:
-            # Create subgraph of only document nodes
+            # Create document-to-document citation network for better PageRank
+            doc_citation_graph = nx.DiGraph()
+
+            # Add all document nodes
             doc_nodes = [n for n, d in self.citation_graph.nodes(data=True)
                         if d.get("type") == "document"]
-            doc_graph = self.citation_graph.subgraph(doc_nodes)
+            for doc_node in doc_nodes:
+                doc_citation_graph.add_node(doc_node)
 
-            if doc_graph.number_of_nodes() > 0:
-                self.authority_cache = nx.pagerank(doc_graph, weight="confidence")
+            # Create edges between documents that cite the same sources
+            citation_to_docs = defaultdict(list)
+            for doc_id in doc_nodes:
+                if doc_id in self.citation_graph:
+                    for cited_source in self.citation_graph.neighbors(doc_id):
+                        if self.citation_graph.nodes[cited_source].get("type") == "citation":
+                            citation_to_docs[cited_source].append(doc_id)
+
+            # Add weighted edges between documents citing same sources
+            for citation, citing_docs in citation_to_docs.items():
+                if len(citing_docs) > 1:  # Multiple docs cite same source
+                    for i, doc1 in enumerate(citing_docs):
+                        for doc2 in citing_docs[i+1:]:
+                            # Bidirectional edges for co-citation similarity
+                            weight = 1.0
+                            if doc_citation_graph.has_edge(doc1, doc2):
+                                weight += doc_citation_graph[doc1][doc2]['weight']
+                            doc_citation_graph.add_edge(doc1, doc2, weight=weight)
+                            doc_citation_graph.add_edge(doc2, doc1, weight=weight)
+
+            # Compute PageRank on connected document graph
+            if doc_citation_graph.number_of_edges() > 0:
+                self.authority_cache = nx.pagerank(doc_citation_graph, weight="weight")
+                logger.info(f"Computed authority scores for {len(self.authority_cache)} documents "
+                           f"using {doc_citation_graph.number_of_edges()} citation relationships")
             else:
+                # Fallback: use citation count as authority proxy
                 self.authority_cache = {}
+                for doc_id in doc_nodes:
+                    citation_count = len(list(self.citation_graph.neighbors(doc_id)))
+                    self.authority_cache[doc_id] = citation_count / max(len(doc_nodes), 1)
+                logger.warning("No citation relationships found, using citation count as authority proxy")
 
         except Exception as e:
             logger.warning(f"Failed to compute authority scores: {e}")
@@ -529,35 +561,36 @@ class RelatedCaseService:
         reasons = []
         scores = []
 
-        # Citation overlap score
-        citation_score = self._count_citation_overlap(source_doc, candidate_doc) * 0.3
+        # Citation overlap score (increased weight for legal relevance)
+        citation_score = self._count_citation_overlap(source_doc, candidate_doc) * 0.4
         if citation_score > 0:
             scores.append(citation_score)
             reasons.append(f"citation_overlap:{citation_score:.2f}")
 
-        # Topic overlap score
-        topic_score = self._count_topic_overlap(source_doc, candidate_doc) * 0.25
+        # Topic overlap score (increased weight)
+        topic_score = self._count_topic_overlap(source_doc, candidate_doc) * 0.3
         if topic_score > 0:
             scores.append(topic_score)
             reasons.append(f"topic_overlap:{topic_score:.2f}")
 
-        # Judicial similarity score
-        judicial_score = self._calculate_judicial_similarity(source_doc, candidate_doc) * 0.2
-        if judicial_score > 0:
-            scores.append(judicial_score)
-            reasons.append(f"judicial_similarity:{judicial_score:.2f}")
-
-        # Authority boost
-        authority_score = self.authority_cache.get(str(candidate_doc["id"]), 0) * 0.15
+        # Authority boost (FIXED: increased scale from 0.15 to 3.0)
+        raw_authority = self.authority_cache.get(str(candidate_doc["id"]), 0)
+        authority_score = raw_authority * 3.0  # Scale PageRank scores to meaningful range
         if authority_score > 0:
             scores.append(authority_score)
             reasons.append(f"authority:{authority_score:.2f}")
 
-        # Semantic similarity (if available)
-        semantic_score = self._calculate_semantic_similarity(source_doc, candidate_doc) * 0.1
+        # Semantic similarity (increased weight for better relevance)
+        semantic_score = self._calculate_semantic_similarity(source_doc, candidate_doc) * 0.25
         if semantic_score > 0:
             scores.append(semantic_score)
             reasons.append(f"semantic:{semantic_score:.2f}")
+
+        # Judicial similarity (reduced weight to prevent same-judge bias)
+        judicial_score = self._calculate_judicial_similarity(source_doc, candidate_doc) * 0.1
+        if judicial_score > 0:
+            scores.append(judicial_score)
+            reasons.append(f"judicial_similarity:{judicial_score:.2f}")
 
         total_score = sum(scores) if scores else 0.0
         return total_score, reasons

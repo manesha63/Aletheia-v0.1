@@ -80,7 +80,7 @@ class TopicClusteringService:
 
         # Validate parameters
         try:
-            min_cluster_size = validate_positive_integer(min_cluster_size, "min_cluster_size", 2, 20)
+            min_cluster_size = validate_positive_integer(min_cluster_size, "min_cluster_size", 1, 20)
             max_clusters = validate_positive_integer(max_clusters, "max_clusters", 1, 100)
             if not 0.0 <= similarity_threshold <= 1.0:
                 raise ValueError("similarity_threshold must be between 0.0 and 1.0")
@@ -92,6 +92,31 @@ class TopicClusteringService:
 
         # Fetch all documents with topic data
         documents = await self._fetch_documents_with_topics()
+
+        # Early return for insufficient data
+        if len(documents) < min_cluster_size:
+            logger.warning(f"Insufficient documents for clustering: {len(documents)} < {min_cluster_size}")
+            return ClusterGraph(
+                clusters=[],
+                topic_hierarchy={},
+                document_cluster_mapping={},
+                topic_similarity_matrix={},
+                cluster_relationships={},
+                computation_metadata={
+                    "algorithm_version": "1.0",
+                    "clustering_method": "insufficient_data",
+                    "total_documents": len(documents),
+                    "total_unique_topics": 0,
+                    "cluster_count": 0,
+                    "error": "Insufficient documents with topics for clustering",
+                    "parameters": {
+                        "min_cluster_size": min_cluster_size,
+                        "max_clusters": max_clusters,
+                        "similarity_threshold": similarity_threshold,
+                        "use_semantic_clustering": use_semantic_clustering
+                    }
+                }
+            )
 
         # Build topic co-occurrence matrix
         topic_cooccurrence = self._build_topic_cooccurrence_matrix(documents)
@@ -171,14 +196,17 @@ class TopicClusteringService:
         """Process documents in memory-efficient batches"""
         query = {
             "query": {
-                "range": {
-                    "legal_topics.confidence": {"gte": 0.3}  # Minimum confidence
+                "bool": {
+                    "should": [
+                        {"exists": {"field": "legal_topics"}},  # Prefer docs with legal_topics
+                        {"exists": {"field": "content"}}        # But also get docs with content for fallback
+                    ]
                 }
             },
             "size": batch_size,
             "_source": [
                 "id", "case_name", "judge_name", "court_id", "filing_date",
-                "legal_topics", "content_embedding", "document_type", "content_length"
+                "legal_topics", "content_embedding", "document_type", "content_length", "content"
             ]
         }
 
@@ -231,7 +259,7 @@ class TopicClusteringService:
         topic_counts = defaultdict(int)
 
         for doc in documents:
-            topics = self._extract_document_topics(doc, min_confidence=0.5)
+            topics = self._extract_document_topics(doc, min_confidence=0.3)
             topic_names = [topic["topic"] for topic in topics]
 
             # Count individual topics
@@ -290,7 +318,7 @@ class TopicClusteringService:
             if not embedding:
                 continue
 
-            topics = self._extract_document_topics(doc, min_confidence=0.5)
+            topics = self._extract_document_topics(doc, min_confidence=0.3)
             for topic in topics:
                 topic_name = topic["topic"]
                 confidence = topic["confidence"]
@@ -604,10 +632,11 @@ class TopicClusteringService:
         return cluster_docs[:5]  # Top 5 representative cases
 
     def _extract_document_topics(self, doc: Dict, min_confidence: float = 0.3) -> List[Dict]:
-        """Extract topics from document with confidence filtering"""
+        """Extract topics from document with confidence filtering and content fallback"""
         topics = []
         raw_topics = doc.get("legal_topics", []) or []
 
+        # First try: use existing legal_topics if available
         for topic in raw_topics:
             if isinstance(topic, dict):
                 confidence = topic.get("confidence", 0.0)
@@ -619,9 +648,45 @@ class TopicClusteringService:
                         "confidence": confidence
                     })
 
+        # Fallback: extract topics from content if no legal_topics found
+        if not topics and doc.get("content"):
+            topics = self._extract_topics_from_content(doc["content"], min_confidence)
+
         # Sort by confidence
         topics.sort(key=lambda x: x["confidence"], reverse=True)
         return topics
+
+    def _extract_topics_from_content(self, content: str, min_confidence: float = 0.3) -> List[Dict]:
+        """Fallback method to extract topics from document content"""
+        if not content or len(content) < 100:
+            return []
+
+        # Simple keyword-based topic extraction
+        topic_keywords = {
+            "Constitutional Law": ["constitutional", "amendment", "constitution", "due process", "equal protection"],
+            "Contract Law": ["contract", "breach", "agreement", "warranty", "consideration"],
+            "Patent Law": ["patent", "infringement", "claim", "invention", "uspto"],
+            "Evidence Law": ["evidence", "hearsay", "testimony", "witness", "admissible"],
+            "Civil Procedure": ["motion", "dismiss", "summary judgment", "discovery", "venue"],
+            "Criminal Law": ["criminal", "prosecution", "defendant", "guilty", "sentencing"],
+            "Employment Law": ["employment", "discrimination", "workplace", "title vii", "ada"],
+            "Environmental Law": ["environmental", "epa", "pollution", "clean air act", "cercla"]
+        }
+
+        content_lower = content.lower()
+        extracted_topics = []
+
+        for topic_name, keywords in topic_keywords.items():
+            matches = sum(1 for keyword in keywords if keyword in content_lower)
+            if matches >= 2:  # Require at least 2 keyword matches
+                confidence = min(0.3 + (matches * 0.1), 0.9)  # Scale based on matches
+                if confidence >= min_confidence:
+                    extracted_topics.append({
+                        "topic": topic_name,
+                        "confidence": confidence
+                    })
+
+        return extracted_topics
 
     async def _get_document(self, document_id: str) -> Optional[Dict]:
         """Get single document by ID"""
@@ -630,7 +695,7 @@ class TopicClusteringService:
             "size": 1,
             "_source": [
                 "id", "case_name", "judge_name", "court_id", "filing_date",
-                "legal_topics", "content_embedding", "document_type", "content_length"
+                "legal_topics", "content_embedding", "document_type", "content_length", "content"
             ]
         }
 

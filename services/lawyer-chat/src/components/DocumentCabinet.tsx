@@ -207,6 +207,31 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
     }
   }, [selectedDocIds, judges, onDocumentsSelected]);
 
+  // Smart profile selection based on query context
+  const selectSearchProfile = (query: string): 'basic' | 'professional' | 'advanced' | 'research' | 'litigation' => {
+    const lowerQuery = query.toLowerCase();
+
+    // Research-focused queries
+    if (lowerQuery.includes('precedent') || lowerQuery.includes('citation') || lowerQuery.includes('legal authority')) {
+      return 'research';
+    }
+
+    // Litigation-focused queries
+    if (lowerQuery.includes('motion') || lowerQuery.includes('ruling') || lowerQuery.includes('judgment') ||
+        lowerQuery.includes('outcome') || lowerQuery.includes('decision')) {
+      return 'litigation';
+    }
+
+    // Advanced queries (complex legal concepts)
+    if (lowerQuery.includes('analysis') || lowerQuery.includes('interpretation') ||
+        lowerQuery.includes('doctrine') || lowerQuery.includes('framework')) {
+      return 'advanced';
+    }
+
+    // Default to professional for most legal research
+    return 'professional';
+  };
+
   // Enhanced AI search functionality
   const performSearch = async (query: string) => {
     if (!query.trim()) {
@@ -221,17 +246,18 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
       setSearchLoading(true);
       setSearchError(null);
 
-      // Use AI search with professional profile for optimal results
+      // Smart profile selection based on query context
+      const selectedProfile = selectSearchProfile(query.trim());
       const response = await courtAPI.searchAI({
         query: query.trim(),
-        profile: 'professional', // Hybrid search + legal filtering
+        profile: selectedProfile,
         limit: 20
       });
 
       setSearchResults(response.documents);
       setSearchType('ai');
       setAiFeatures({
-        profile: response.search_profile,
+        profile: selectedProfile,
         features_active: response.ai_features_active,
         total_results: response.total
       });
@@ -393,7 +419,10 @@ export function DocumentCabinet({ onDocumentsSelected, isDarkMode, className }: 
                     <div className="flex items-center gap-2 mt-1">
                       {searchType === 'ai' ? (
                         <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-                          🧠 AI Search ({aiFeatures.profile})
+                          🧠 AI Search - {aiFeatures.profile ?
+                            aiFeatures.profile.charAt(0).toUpperCase() + aiFeatures.profile.slice(1) + ' Profile' :
+                            'Professional Profile'
+                          }
                         </span>
                       ) : (
                         <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
